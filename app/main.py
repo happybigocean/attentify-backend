@@ -4,11 +4,14 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 from pymongo import MongoClient
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import os
 
-SECRET_KEY = "your-secret-key"
-ALGORITHM = "HS256"
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient(DATABASE_URL)
 db = client["mydb"]
 users = db["users"]
 
