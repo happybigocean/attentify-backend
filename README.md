@@ -97,6 +97,7 @@ pytest
 ## 🛠️ Useful Commands
 
 - **Run with hot reload:**  
+  `.\venv\Scripts\Activate.ps1`
   `uvicorn app.main:app --reload`
 - **Run in production (example):**  
   `gunicorn -k uvicorn.workers.UvicornWorker app.main:app`
