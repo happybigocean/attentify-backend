@@ -19,6 +19,7 @@ class PyObjectId(ObjectId):
 class ChatEntry(BaseModel):
     sender: Literal["client", "agent", "system", "ai"]
     content: str
+    title: Optional[str] = None  # <-- Added title here
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     channel: Optional[Literal["chat", "sms", "email", "voice"]]
     message_type: Optional[Literal["text", "file", "voice", "system"]] = "text"
@@ -36,6 +37,8 @@ class Message(BaseModel):
     status: Literal["open", "closed", "pending"] = "open"
     channel: Literal["chat", "sms", "email", "voice"]
 
+    title: Optional[str] 
+    
     messages: List[ChatEntry] = []    # all history between client and agent
 
     ai_summary: Optional[str] = None

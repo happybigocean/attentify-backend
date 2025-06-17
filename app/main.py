@@ -10,7 +10,6 @@ from app.db.mongodb import get_database
 
 # CORS origins
 origins = os.getenv("ORIGINS", "http://localhost:5173").split(",")
-
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "attentify")
 
@@ -48,6 +47,8 @@ from app.api.v1 import auth
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
 from app.api.v1 import gmail
 app.include_router(gmail.router, prefix="/api/v1/gmail", tags=["Gmail"])
+from app.api.v1 import message
+app.include_router(message.router, prefix="/api/v1/message", tags=["Message"])
 #app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 #app.include_router(inbox.router, prefix="/api/v1/inbox", tags=["Inbox"])
 #app.include_router(ai.router, prefix="/api/v1/ai", tags=["AI"])
