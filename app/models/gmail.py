@@ -8,6 +8,8 @@ class GmailAccountBase(BaseModel):
     refresh_token: str
     token_type: Optional[str] = "Bearer"
     expires_at: datetime
+    client_id: str
+    client_secret: str
     status: Optional[str] = "connected"
 
 class GmailAccountCreate(GmailAccountBase):

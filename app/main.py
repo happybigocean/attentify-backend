@@ -1,11 +1,12 @@
 #app/main.py
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
 load_dotenv()  # Load from .env at startup
+from app.db.mongodb import get_database
 
 # CORS origins
 origins = os.getenv("ORIGINS", "http://localhost:5173").split(",")
@@ -64,3 +65,8 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+@app.get("/test-db")
+async def test(db=Depends(get_database)):
+    collections = await db.list_collection_names()
+    return {"collections": collections}

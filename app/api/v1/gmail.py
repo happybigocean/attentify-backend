@@ -141,7 +141,7 @@ async def google_oauth_callback(request: Request, code: Optional[str] = None, er
     if not email:
         raise HTTPException(status_code=400, detail="Failed to retrieve user email from Google")
 
-    # Save or update Gmail account in DB
+    # Save or update Gmail account in DB, now including client_id and client_secret
     db = request.app.state.db
     existing = await db.gmail_accounts.find_one({"email": email})
     account_data = {
@@ -151,6 +151,8 @@ async def google_oauth_callback(request: Request, code: Optional[str] = None, er
         "token_type": "Bearer",
         "expires_at": expires_at,
         "status": "connected",
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
     }
     if existing:
         await db.gmail_accounts.update_one({"_id": existing["_id"]}, {"$set": account_data})
@@ -158,5 +160,4 @@ async def google_oauth_callback(request: Request, code: Optional[str] = None, er
         await db.gmail_accounts.insert_one(account_data)
 
     redirect_url = f"{FRONTEND_URL}/accounts"
-    # Redirect or return success message
     return RedirectResponse(url=redirect_url)
