@@ -25,6 +25,20 @@ class ChatEntry(BaseModel):
     message_type: Optional[Literal["text", "file", "voice", "system"]] = "text"
     metadata: Optional[dict] = {}
 
+class MessageCreate(BaseModel):
+    client_id: str
+    agent_id: Optional[str]
+    session_id: Optional[str] = None
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    status: Literal["open", "closed", "pending"] = "open"
+    channel: Literal["chat", "sms", "email", "voice"]
+    title: Optional[str]
+    messages: List[ChatEntry] = []
+    ai_summary: Optional[str] = None
+    tags: Optional[List[str]] = []
+    resolved_by_ai: bool = False
+    
 class Message(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
 

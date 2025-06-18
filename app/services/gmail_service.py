@@ -3,7 +3,7 @@ from datetime import datetime
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from app.models.message import Message, ChatEntry  # Ensure your model imports are correct
+from app.models.message import Message, MessageCreate, ChatEntry  # Ensure your model imports are correct
 from bson import ObjectId
 import logging
 import requests
@@ -109,7 +109,7 @@ async def fetch_and_save_gmail(account: dict, db):
                     }
                 )
             else:
-                message_doc = Message(
+                message_doc = MessageCreate(
                     client_id=sender,
                     agent_id=None,
                     channel="email",
