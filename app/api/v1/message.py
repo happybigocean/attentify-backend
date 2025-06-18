@@ -57,19 +57,21 @@ def doc_to_message_detail(doc: dict) -> Message:
         messages=[]  # or omit this line if optional in schema
     )
 
-@router.get("/", response_model=List[dict])  # or just Response, see note below
+@router.get("/", response_model=List[dict])
 async def get_messages(db=Depends(get_database)):
     cursor = db["messages"].find({})
     messages = []
     async for doc in cursor:
         doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
+
         raw_client_id = doc.get("client_id", "")
         cleaned_client_id = extract_name(raw_client_id)
         doc["client_id"] = cleaned_client_id
+
+        doc.pop("messages", None)  # <- Remove the 'messages' field if it exists
+
         messages.append(doc)
     return messages
-
-
 
 @router.get("/{id}", response_model=dict)
 async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database)):
