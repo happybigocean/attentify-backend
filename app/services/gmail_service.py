@@ -65,6 +65,7 @@ async def fetch_and_save_gmail(account: dict, db):
 
             subject = next((h["value"] for h in headers if h["name"] == "Subject"), "")
             sender = next((h["value"] for h in headers if h["name"] == "From"), "")
+            to = next((h["value"] for h in headers if h["name"] == "To"), "")
             date = next((h["value"] for h in headers if h["name"] == "Date"), "")
 
             try:
@@ -72,27 +73,53 @@ async def fetch_and_save_gmail(account: dict, db):
             except Exception:
                 timestamp = datetime.utcnow()
 
-            # Extract plain text body
-            body = ""
-            if "parts" in payload:
-                for part in payload["parts"]:
-                    if part.get("mimeType") == "text/plain":
+            # Extract plain text and HTML body
+            text_body, html_body = "", ""
+            def extract_bodies(payload):
+                nonlocal text_body, html_body
+                if "parts" in payload:
+                    for part in payload["parts"]:
+                        mime_type = part.get("mimeType")
                         data = part["body"].get("data", "")
                         if data:
-                            body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
-                            break
-            else:
-                data = payload.get("body", {}).get("data", "")
-                if data:
-                    body = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+                            decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+                            if mime_type == "text/plain" and not text_body:
+                                text_body = decoded
+                            elif mime_type == "text/html" and not html_body:
+                                html_body = decoded
+                        # Recursively extract from nested parts (for multipart/alternative)
+                        if "parts" in part:
+                            extract_bodies(part)
+                else:
+                    data = payload.get("body", {}).get("data", "")
+                    if data:
+                        decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+                        mime_type = payload.get("mimeType")
+                        if mime_type == "text/plain":
+                            text_body = decoded
+                        elif mime_type == "text/html":
+                            html_body = decoded
+
+            extract_bodies(payload)
+
+            # Prefer HTML, fallback to plain text
+            content = html_body if html_body else text_body
 
             chat_entry = ChatEntry(
                 sender="client",
-                content=body,
+                content=content,
                 title=subject,
                 channel="email",
                 timestamp=timestamp,
-                metadata={"gmail_id": gmail_id}
+                metadata={
+                    "gmail_id": gmail_id,
+                    "from": sender,
+                    "to": to,
+                    "subject": subject,
+                    "date": date,
+                    "has_html": bool(html_body),
+                    "has_text": bool(text_body)
+                }
             )
 
             # Store or update message thread
@@ -126,7 +153,7 @@ async def fetch_and_save_gmail(account: dict, db):
 
     except Exception as e:
         logging.exception(f"Error fetching emails for {account['email']}: {str(e)}")
-        return f"Failed to fetch emails for {account['email']} due to an error."
+        return f"Failed to fetch emails for {account['email']} due to an error."  
     
 async def fetch_all_gmail_accounts(db):
     cursor = db["gmail_accounts"].find({})
