@@ -7,6 +7,7 @@ from app.models.message import Message, MessageCreate, ChatEntry  # Ensure your 
 from bson import ObjectId
 import logging
 import requests
+from datetime import datetime
 
 async def fetch_and_save_gmail(account: dict, db):
     creds = Credentials(
@@ -18,14 +19,30 @@ async def fetch_and_save_gmail(account: dict, db):
         scopes=["https://www.googleapis.com/auth/gmail.readonly"],
     )
 
-    if creds.expired and creds.refresh_token:
+    # Use expires_at from account if present
+    expires_at = account.get("expires_at")
+    token_expired = False
+    if expires_at:
+        try:
+            # Parse ISO datetime string (Python 3.7+)
+            expires_at_dt = datetime.fromisoformat(expires_at) if isinstance(expires_at, str) else expires_at
+            # Remove tzinfo for UTC comparison if needed
+            if expires_at_dt.tzinfo:
+                expires_at_dt = expires_at_dt.astimezone(tz=None).replace(tzinfo=None)
+            token_expired = datetime.utcnow() >= expires_at_dt
+        except Exception as e:
+            logging.warning(f"Could not parse expires_at: {expires_at} ({e})")
+            token_expired = creds.expired
+    else:
+        token_expired = creds.expired
+
+    if token_expired and creds.refresh_token:
         try:
             creds.refresh(Request())
         except Exception as e:
             logging.error(f"Failed to refresh token for {account['email']}: {e}")
             return f"Token refresh failed for {account['email']}"
 
-    # Optional: Verify actual granted scopes
     try:
         token_info = requests.get(
             f"https://www.googleapis.com/oauth2/v1/tokeninfo?access_token={creds.token}"
@@ -165,7 +182,8 @@ async def fetch_all_gmail_accounts(db):
                 "access_token": cred["access_token"],
                 "refresh_token": cred["refresh_token"],
                 "client_id": cred["client_id"],
-                "client_secret": cred["client_secret"]
+                "client_secret": cred["client_secret"],
+                "expires_at": cred.get("expires_at")
             }
 
             result = await fetch_and_save_gmail(token_data, db)  # now only 2 args
