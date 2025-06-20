@@ -3,7 +3,7 @@ from datetime import datetime
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from app.models.message import Message, MessageCreate, ChatEntry  # Ensure your model imports are correct
+from app.models.message import Message, ChatEntry  # Ensure your model imports are correct
 from bson import ObjectId
 import logging
 import requests
@@ -19,14 +19,15 @@ async def fetch_and_save_gmail(account: dict, db):
         scopes=["https://www.googleapis.com/auth/gmail.readonly"],
     )
 
-    # Use expires_at from account if present
+    # Token expiration check
     expires_at = account.get("expires_at")
     token_expired = False
     if expires_at:
         try:
-            # Parse ISO datetime string (Python 3.7+)
-            expires_at_dt = datetime.fromisoformat(expires_at) if isinstance(expires_at, str) else expires_at
-            # Remove tzinfo for UTC comparison if needed
+            expires_at_dt = (
+                datetime.fromisoformat(expires_at)
+                if isinstance(expires_at, str) else expires_at
+            )
             if expires_at_dt.tzinfo:
                 expires_at_dt = expires_at_dt.astimezone(tz=None).replace(tzinfo=None)
             token_expired = datetime.utcnow() >= expires_at_dt
@@ -54,7 +55,6 @@ async def fetch_and_save_gmail(account: dict, db):
 
     try:
         service = build("gmail", "v1", credentials=creds)
-
         result = service.users().messages().list(
             userId="me",
             maxResults=10
@@ -65,18 +65,10 @@ async def fetch_and_save_gmail(account: dict, db):
 
         for msg in messages:
             gmail_id = msg["id"]
-
-            # Skip if already stored
-            existing = await db["messages"].find_one({
-                "messages.metadata.gmail_id": gmail_id
-            })
-            if existing:
-                continue
-
             full_msg = service.users().messages().get(
                 userId="me", id=gmail_id, format="full"
             ).execute()
-
+            thread_id = full_msg.get("threadId", gmail_id)
             payload = full_msg.get("payload", {})
             headers = payload.get("headers", [])
 
@@ -92,6 +84,7 @@ async def fetch_and_save_gmail(account: dict, db):
 
             # Extract plain text and HTML body
             text_body, html_body = "", ""
+
             def extract_bodies(payload):
                 nonlocal text_body, html_body
                 if "parts" in payload:
@@ -104,7 +97,6 @@ async def fetch_and_save_gmail(account: dict, db):
                                 text_body = decoded
                             elif mime_type == "text/html" and not html_body:
                                 html_body = decoded
-                        # Recursively extract from nested parts (for multipart/alternative)
                         if "parts" in part:
                             extract_bodies(part)
                 else:
@@ -118,59 +110,66 @@ async def fetch_and_save_gmail(account: dict, db):
                             html_body = decoded
 
             extract_bodies(payload)
-
-            # Prefer HTML, fallback to plain text
             content = html_body if html_body else text_body
 
             chat_entry = ChatEntry(
-                sender="client",
+                sender=sender,
+                recipient=to,
                 content=content,
                 title=subject,
-                channel="email",
                 timestamp=timestamp,
+                channel="email",
+                message_type="html" if html_body else "text",
                 metadata={
                     "gmail_id": gmail_id,
                     "from": sender,
                     "to": to,
                     "subject": subject,
-                    "date": date,
-                    "has_html": bool(html_body),
-                    "has_text": bool(text_body)
+                    "date": date
                 }
             )
 
-            # Store or update message thread
-            existing_thread = await db["messages"].find_one({"client_id": sender})
+            # Find existing thread (conversation) in 'messages' collection by thread_id
+            existing_thread = await db["messages"].find_one({"thread_id": thread_id, "channel": "email"})
+
+            # Avoid duplicate insert of the same gmail_id in a thread
             if existing_thread:
+                if any(m.get("metadata", {}).get("gmail_id") == gmail_id for m in existing_thread.get("messages", [])):
+                    continue
                 await db["messages"].update_one(
                     {"_id": existing_thread["_id"]},
                     {
                         "$push": {"messages": chat_entry.dict()},
                         "$set": {
-                            "last_updated": datetime.utcnow(),
-                            "title": subject
-                        },
+                            "last_updated": timestamp,
+                            "title": subject,
+                            "participants": list(set(existing_thread.get("participants", []) + [sender, to]))
+                        }
                     }
                 )
             else:
-                message_doc = MessageCreate(
-                    client_id=sender,
-                    agent_id=None,
-                    channel="email",
-                    status="open",
-                    title=subject,
-                    messages=[chat_entry],
-                    last_updated=datetime.utcnow()
-                )
-                await db["messages"].insert_one(message_doc.dict(by_alias=True))
-
+                message_doc = {
+                    "thread_id": thread_id,
+                    "participants": list(set([sender, to])),
+                    "channel": "email",
+                    "status": "open",
+                    "title": subject,
+                    "client_id": sender,
+                    "messages": [chat_entry.dict()],
+                    "last_updated": timestamp,
+                    "started_at": timestamp,
+                    "ai_summary": None,
+                    "tags": [],
+                    "resolved_by_ai": False
+                }
+                await db["messages"].insert_one(message_doc)
             stored_count += 1
 
-        return f"Fetched and stored {stored_count} new messages for {account['email']}"
+        return f"Fetched and stored {stored_count} new messages (grouped by thread) for {account['email']}"
 
     except Exception as e:
         logging.exception(f"Error fetching emails for {account['email']}: {str(e)}")
-        return f"Failed to fetch emails for {account['email']} due to an error."  
+        return f"Failed to fetch emails for {account['email']} due to an error."
     
 async def fetch_all_gmail_accounts(db):
     cursor = db["gmail_accounts"].find({})

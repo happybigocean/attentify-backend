@@ -8,6 +8,7 @@ from typing import List
 import re
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
+from app.services.ai_service import analyze_emails_with_ai
 
 router = APIRouter()
 
@@ -84,3 +85,9 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
 
     doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
     return doc
+
+@router.post("/analyze_email", response_model=str)
+async def analyze_email():
+    # This endpoint is a placeholder for email analysis logic
+    result = await analyze_emails_with_ai('What is summary of this email?', ['This is a test email.'])
+    return result
