@@ -86,8 +86,22 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
     doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
     return doc
 
-@router.post("/analyze_email", response_model=str)
-async def analyze_email():
-    # This endpoint is a placeholder for email analysis logic
-    result = await analyze_emails_with_ai('What is summary of this email?', ['This is a test email.'])
+@router.post("/analyze_email/{id}", response_model=list)
+async def analyze_email(
+    id: str,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """
+    Analyze all email ChatEntry objects in a message and extract order/refund/cancel info as JSON.
+    Input: message id (MongoDB ObjectId as path param).
+    Output: List of JSON results, one per ChatEntry.
+    """
+    if not ObjectId.is_valid(id):
+        raise HTTPException(status_code=400, detail="Invalid message ID")
+
+    doc = await db["messages"].find_one({"_id": ObjectId(id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    result = await analyze_emails_with_ai(doc)
     return result
