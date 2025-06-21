@@ -1,6 +1,6 @@
 # app/routes/message.py
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from app.services.gmail_service import fetch_all_gmail_accounts
 from app.db.mongodb import get_database
 from app.models.message import Message, ChatEntry, PyObjectId 
@@ -9,6 +9,7 @@ import re
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 from app.services.ai_service import analyze_emails_with_ai
+import json
 
 router = APIRouter()
 
@@ -86,22 +87,33 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
     doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
     return doc
 
-@router.post("/analyze_email/{id}", response_model=list)
-async def analyze_email(
-    id: str,
+@router.post("/analyze", response_model=list)
+async def analyze_email_message(
+    body: dict = Body(...),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Analyze all email ChatEntry objects in a message and extract order/refund/cancel info as JSON.
-    Input: message id (MongoDB ObjectId as path param).
+    Input: JSON body with { "message_id": str }.
     Output: List of JSON results, one per ChatEntry.
     """
-    if not ObjectId.is_valid(id):
+    message_id = body.get("message_id")
+    if not message_id or not ObjectId.is_valid(message_id):
         raise HTTPException(status_code=400, detail="Invalid message ID")
 
-    doc = await db["messages"].find_one({"_id": ObjectId(id)})
+    doc = await db["messages"].find_one({"_id": ObjectId(message_id)})
     if not doc:
         raise HTTPException(status_code=404, detail="Message not found")
 
     result = await analyze_emails_with_ai(doc)
-    return result
+    order_list = []
+    for entry in result:
+        try:
+            order_info = json.loads(entry["response"])
+            if order_info.get("order_id") and order_info.get("status") == 1:
+                order_info["shopify_order"] = {}
+                order_list.append(order_info)
+        except Exception:
+            continue
+
+    return order_list
