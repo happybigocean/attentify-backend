@@ -22,7 +22,7 @@ prompt_template = PromptTemplate(
     template=EMAIL_ANALYSIS_PROMPT
 )
 
-async def analyze_emails_with_ai(message: Dict[str, Any]):
+async def analyze_emails_with_ai_as_list(message: Dict[str, Any]):
     """
     Args:
         message: A Message object or dict, which has a 'messages' field containing ChatEntry dicts.
@@ -46,3 +46,30 @@ async def analyze_emails_with_ai(message: Dict[str, Any]):
             "response": result.content
         })
     return results
+
+async def analyze_emails_with_ai(message: Dict[str, Any]):
+    """
+    Args:
+        message: A Message object or dict, which has a 'messages' field containing ChatEntry dicts.
+    Returns:
+        Single AI JSON output for the last 3 messages combined.
+    """
+    entries = message.get("messages", [])
+    if not entries:
+        return None  # or {} or custom error
+
+    # Get the last 3 entries (or fewer if not enough)
+    last_entries = entries[-3:]
+    # Combine their contents, e.g. join with linebreak
+    combined_content = "\n\n".join(entry.get("content", "") for entry in last_entries)
+    # base64 encode the combined email body
+    encoded_content = base64.b64encode(combined_content.encode("utf-8")).decode("utf-8")
+    # Prepare the prompt
+    prompt = prompt_template.format(email_contents=encoded_content)
+    # Call the LLM synchronously (langchain-anthropic currently does not support async)
+    result = llm.invoke(prompt)
+    # Return a single result dict (not a list)
+    return {
+        "entry_ids": [entry.get("metadata", {}).get("gmail_id") for entry in last_entries],
+        "response": result.content
+    }

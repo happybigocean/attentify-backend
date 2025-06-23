@@ -87,8 +87,8 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
     doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
     return doc
 
-@router.post("/analyze", response_model=list)
-async def analyze_email_message(
+@router.post("/analyze_as_list", response_model=list)
+async def analyze_email_message_as_list(
     body: dict = Body(...),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
@@ -117,3 +117,34 @@ async def analyze_email_message(
             continue
 
     return order_list
+
+@router.post("/analyze", response_model=dict)
+async def analyze_email_message(
+    body: dict = Body(...),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """
+    Analyze the last three email ChatEntry objects in a message and extract order/refund/cancel info as JSON.
+    Input: JSON body with { "message_id": str }.
+    Output: Single JSON result for the combined analysis.
+    """
+    message_id = body.get("message_id")
+    if not message_id or not ObjectId.is_valid(message_id):
+        raise HTTPException(status_code=400, detail="Invalid message ID")
+
+    doc = await db["messages"].find_one({"_id": ObjectId(message_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    result = await analyze_emails_with_ai(doc)
+    # result is now a single dict, not a list
+
+    try:
+        order_info = json.loads(result["response"])
+        if order_info.get("order_id") and order_info.get("status") == 1:
+            order_info["shopify_order"] = {}
+            return order_info
+    except Exception:
+        pass
+
+    return {}  # or return order_info if you want to return whatever the AI gave, even if not a valid order
