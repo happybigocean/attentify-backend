@@ -10,9 +10,12 @@ llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
 EMAIL_ANALYSIS_PROMPT = (
     "The following text is an order, cancellation, or refund email encoded in Base64 from a Shopify customer. "
-    "Please check if the order ID field exists and is correct. If the email is correct, then output the necessary string formatted as JSON. "
-    "The JSON string should include order_id, type (either cancel or refund), status (1 if correct, otherwise 0), and msg "
-    "(a message requesting the order ID if the email is incorrect; if the email is correct, msg should be null). "
+    "Please check if the order_id field exists and is correct. "
+    "If the email is correct, output the necessary string formatted as JSON. "
+    "The JSON string should include order_id, type (either cancel or refund), status (1 if correct, otherwise 0), and msg. "
+    "If the email is incorrect, msg should be a message requesting the order ID. "
+    "If the email is correct, msg should be a reply message to the customer, such as: "
+    "'Your order has been canceled.' or 'Your refund has been processed.' or another appropriate reply. "
     "I need only the JSON output:\n\n"
     "{email_contents}"
 )

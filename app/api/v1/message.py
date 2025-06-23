@@ -139,12 +139,5 @@ async def analyze_email_message(
     result = await analyze_emails_with_ai(doc)
     # result is now a single dict, not a list
 
-    try:
-        order_info = json.loads(result["response"])
-        if order_info.get("order_id") and order_info.get("status") == 1:
-            order_info["shopify_order"] = {}
-            return order_info
-    except Exception:
-        pass
-
-    return {}  # or return order_info if you want to return whatever the AI gave, even if not a valid order
+    order_info = json.loads(result["response"])
+    return order_info
