@@ -1,4 +1,4 @@
-from fastapi import APIRouter, FastAPI, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import RedirectResponse
 from urllib.parse import quote
 import hmac, hashlib, requests
@@ -10,6 +10,8 @@ SHOPIFY_API_KEY = os.getenv("SHOPIFY_API_KEY")
 SHOPIFY_API_SECRET = os.getenv("SHOPIFY_API_SECRET")
 SHOPIFY_REDIRECT_URI = os.getenv("SHOPIFY_REDIRECT_URI", "http://localhost:8000/api/v1/shopify/callback")
 SHOPIFY_SCOPE = "read_orders,write_orders,read_customers,write_customers"
+SHOPIFY_INSTALL_URL=os.getenv("SHOPIFY_INSTALL_URL")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 #/api/v1/shopify/auth
 @router.get("/auth")
@@ -17,17 +19,17 @@ def shopify_auth(request: Request):
     """
     Redirect user to Shopify OAuth consent page
     """
-    shop = request.query_params.get("shop")
-    if not shop:
-        raise HTTPException(status_code=400, detail="Missing 'shop' parameter")
+    #shop = request.query_params.get("shop")
+    #if not shop:
+    #    raise HTTPException(status_code=400, detail="Missing 'shop' parameter")
 
     # Generate the install URL
-    install_url = (
-        f"https://{shop}/admin/oauth/authorize?client_id={SHOPIFY_API_KEY}"
-        f"&scope={quote(SHOPIFY_SCOPE)}&redirect_uri={quote(SHOPIFY_REDIRECT_URI)}"
-    )
-    
-    return RedirectResponse(install_url)
+    #install_url = (
+    #    f"https://{shop}/admin/oauth/authorize?client_id={SHOPIFY_API_KEY}"
+    #    f"&scope={quote(SHOPIFY_SCOPE)}&redirect_uri={quote(SHOPIFY_REDIRECT_URI)}"
+    #)
+
+    return RedirectResponse(SHOPIFY_INSTALL_URL)
 
 #/api/v1/shopify/callback
 @router.get("/callback")
@@ -75,6 +77,16 @@ def shopify_callback(request: Request):
     )
 
     return {"message": "OAuth successful", "shop": shop, "access_token": access_token}
+
+@router.get("/install")
+def shopify_install(request: Request):
+    params = dict(request.query_params)
+    shop = params.get("shop")
+    hmac = params.get("hmac")
+    if not shop or not hmac:
+        raise HTTPException(status_code=400, detail="Missing 'shop' or 'hmac' parameter")
+    redirect_uri = f"{BACKEND_URL}/api/v1/shopify/callback"
+    return RedirectResponse(redirect_uri)
 
 #/api/v1/shopify/orders
 @router.get("/orders")
