@@ -1,7 +1,7 @@
 # app/routes/message.py
 
 from fastapi import APIRouter, HTTPException, Depends, Body
-from app.services.gmail_service import fetch_all_gmail_accounts
+from app.services.gmail_service import fetch_all_gmail_accounts, get_gmail_service
 from app.db.mongodb import get_database
 from app.models.message import Message, ChatEntry, PyObjectId 
 from typing import List
@@ -10,6 +10,12 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 from app.services.ai_service import analyze_emails_with_ai
 import json
+from bson import ObjectId
+import base64
+from email.utils import formatdate, format_datetime
+from email.mime.text import MIMEText
+from datetime import datetime, timezone
+from email.utils import parseaddr
 
 router = APIRouter()
 
@@ -141,3 +147,104 @@ async def analyze_email_message(
 
     order_info = json.loads(result["response"])
     return order_info
+
+@router.post("/{id}/reply", response_model=dict)
+async def reply_to_message(
+    id: str,
+    body: dict = Body(...),  # expects: { "content": "the reply text" }
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """
+    Reply to a message by adding a new ChatEntry and sending email via Gmail API.
+    Input: Message ID (path) and reply content (body).
+    Output: Updated message document.
+    """
+    
+    if not ObjectId.is_valid(id):
+        raise HTTPException(status_code=400, detail="Invalid message ID")
+    
+    message = await db["messages"].find_one({"_id": ObjectId(id)})
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    # Find latest client message for threading
+    client_message = None
+    for msg in reversed(message.get("messages", [])):
+        if msg.get("sender") == message.get("client_id"):
+            client_message = msg
+            break
+    if not client_message:
+        raise HTTPException(status_code=400, detail="No client message to reply to.")
+    
+    # Identify Gmail user (agent sending reply)
+    agent_id = None
+    agent_id = message.get("agent_id")  # agent_id should be the email of the agent
+
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="No Gmail user found in participants.")
+    print(agent_id)
+    _, agent_email = parseaddr(agent_id)
+    user_creds = await db["gmail_accounts"].find_one({"email": agent_email})
+    if not user_creds:
+        raise HTTPException(status_code=400, detail="User Gmail credentials not found.")
+
+    thread_id = message.get("thread_id")
+    subject = client_message.get("title", "No Subject")
+    original_msg_id = client_message.get("metadata", {}).get("gmail_id")
+    to_addr = message.get("client_id")  # recipient (client)
+
+    if original_msg_id and not original_msg_id.startswith("<"):
+        original_msg_id = f"<{original_msg_id}>"
+
+    mime_msg = MIMEText(body["content"])
+    mime_msg['To'] = to_addr
+    mime_msg['From'] = agent_email
+    mime_msg['Subject'] = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+    if original_msg_id:
+        mime_msg['In-Reply-To'] = original_msg_id
+        mime_msg['References'] = original_msg_id
+    mime_msg['Date'] = formatdate(localtime=True)
+
+    raw_message = base64.urlsafe_b64encode(mime_msg.as_bytes()).decode()
+    
+    # Send via Gmail API
+    service = get_gmail_service(user_creds)
+    sent = service.users().messages().send(
+        userId="me",
+        body={
+            'raw': raw_message,
+            'threadId': thread_id
+        }
+    ).execute()
+
+    # Construct ChatEntry and save to DB
+    now = datetime.now(timezone.utc).astimezone()
+    reply_entry = {
+        "sender": agent_email,
+        "recipient": to_addr,
+        "content": body["content"],
+        "title": subject if subject.lower().startswith("re:") else f"Re: {subject}",
+        "timestamp": datetime.utcnow(),
+        "message_type": "html",
+        "channel": "email",
+        "metadata": {
+            "gmail_id": sent.get("id"),
+            "from": agent_email,
+            "to": to_addr,
+            "date": format_datetime(now)
+        }
+    }
+
+    await db["messages"].update_one(
+        {"_id": ObjectId(id)},
+        {
+            "$push": {"messages": reply_entry},
+            "$set": {"last_updated": reply_entry["timestamp"]}
+        }
+    )
+
+    updated_message = await db["messages"].find_one({"_id": ObjectId(id)})
+
+    if '_id' in updated_message:
+        updated_message['_id'] = str(updated_message['_id'])
+    return updated_message

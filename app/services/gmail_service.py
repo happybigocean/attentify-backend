@@ -7,7 +7,6 @@ from app.models.message import Message, ChatEntry  # Ensure your model imports a
 from bson import ObjectId
 import logging
 import requests
-from datetime import datetime
 
 async def fetch_and_save_gmail(account: dict, db):
     creds = Credentials(
@@ -155,6 +154,7 @@ async def fetch_and_save_gmail(account: dict, db):
                     "status": "open",
                     "title": subject,
                     "client_id": sender,
+                    "agent_id": to,
                     "messages": [chat_entry.dict()],
                     "last_updated": timestamp,
                     "started_at": timestamp,
@@ -191,3 +191,19 @@ async def fetch_all_gmail_accounts(db):
             results.append({cred["email"]: f"Error: {str(e)}"})
 
     return results
+
+def get_gmail_service(user_credentials: dict):
+    """
+    Returns an authenticated Gmail API service for the given user's credentials.
+    user_credentials: dict with keys such as token, refresh_token, client_id, client_secret, token_uri, scopes
+    """
+    creds = Credentials(
+        token=user_credentials['access_token'],
+        refresh_token=user_credentials.get('refresh_token'),
+        token_uri=user_credentials.get('token_uri', 'https://oauth2.googleapis.com/token'),
+        client_id=user_credentials['client_id'],
+        client_secret=user_credentials['client_secret'],
+        scopes=user_credentials.get('scopes', ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']),
+    )
+    service = build('gmail', 'v1', credentials=creds)
+    return service
