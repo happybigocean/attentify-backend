@@ -13,6 +13,7 @@ SHOPIFY_REDIRECT_URI = os.getenv("SHOPIFY_REDIRECT_URI", "http://localhost:8000/
 SHOPIFY_SCOPE = "read_orders,write_orders,read_customers,write_customers"
 SHOPIFY_INSTALL_URL=os.getenv("SHOPIFY_INSTALL_URL")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 class ShopifyAuthHelper:
     def __init__(self, client_id: str, client_secret: str):
@@ -110,8 +111,7 @@ def shopify_callback(request: Request):
         upsert=True
     )
 
-    frontend_url = request.query_params.get("FRONTEND_URL", "http://localhost:5173")
-    redirect_frontend_url = f"{frontend_url}/shopify/success?shop={shop}"
+    redirect_frontend_url = f"{FRONTEND_URL}/shopify/success?shop={shop}"
     return RedirectResponse(url=redirect_frontend_url)
 
 @router.get("/install")
