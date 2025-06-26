@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import RedirectResponse
-from urllib.parse import quote
-import hmac, hashlib, requests
+from urllib.parse import urlencode
+import hmac, hashlib, requests, base64
 import os
 
 router = APIRouter()
@@ -12,6 +12,35 @@ SHOPIFY_REDIRECT_URI = os.getenv("SHOPIFY_REDIRECT_URI", "http://localhost:8000/
 SHOPIFY_SCOPE = "read_orders,write_orders,read_customers,write_customers"
 SHOPIFY_INSTALL_URL=os.getenv("SHOPIFY_INSTALL_URL")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+
+class ShopifyAuthHelper:
+    def __init__(self, client_id: str, client_secret: str):
+        self.client_id = client_id
+        self.client_secret = client_secret
+
+    def build_authorization_url(self, shop: str, redirect_uri: str):
+        params = {
+            "client_id": self.client_id,
+            "scope": "read_orders,write_products",  # adjust your scopes
+            "redirect_uri": redirect_uri,
+            "state": "secure_random_state",  # implement CSRF protection!
+        }
+        return f"https://{shop}/admin/oauth/authorize?{urlencode(params)}"
+
+    async def exchange_code_for_access_token(self, shop: str, code: str):
+        import httpx
+        url = f"https://{shop}/admin/oauth/access_token"
+        data = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "code": code,
+        }
+        async with httpx.AsyncClient() as client:
+            r = await client.post(url, data=data)
+            r.raise_for_status()
+            return r.json()["access_token"]
+        
+shopify_auth_helper = ShopifyAuthHelper(SHOPIFY_API_KEY, SHOPIFY_API_SECRET)       
 
 #/api/v1/shopify/auth
 @router.get("/auth")
@@ -86,8 +115,18 @@ def shopify_install(request: Request):
     if not shop or not hmac:
         raise HTTPException(status_code=400, detail="Missing 'shop' or 'hmac' parameter")
     redirect_uri = f"{BACKEND_URL}/api/v1/shopify/callback"
-    return RedirectResponse(redirect_uri)
+    auth_url = shopify_auth_helper.build_authorization_url(shop, redirect_uri)
+    return RedirectResponse(url=auth_url)
 
+def decode_host_func(base64_host: str) -> str:
+    try:
+        padded = base64_host + "=" * ((4 - len(base64_host) % 4) % 4)
+        decoded_bytes = base64.urlsafe_b64decode(padded)
+        return decoded_bytes.decode("utf-8")
+    except Exception as ex:
+        print(f"Error decoding Base64 host: {ex}")
+        return ""
+    
 #/api/v1/shopify/orders
 @router.get("/orders")
 def get_shopify_orders(request: Request):
