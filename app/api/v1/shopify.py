@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
 import hmac, hashlib, requests, base64
 import os
+from typing import List
 
 router = APIRouter()
 
@@ -101,11 +102,17 @@ def shopify_callback(request: Request):
     db = request.app.state.db
     db.shopify_cred.update_one(
         {"shop": shop},
-        {"$set": {"access_token": access_token}},
+        {"$set": {
+            "access_token": access_token, 
+            "status": "connected"
+            }
+        },
         upsert=True
     )
 
-    return {"message": "OAuth successful", "shop": shop, "access_token": access_token}
+    frontend_url = request.query_params.get("FRONTEND_URL", "http://localhost:5173")
+    redirect_frontend_url = f"{frontend_url}/shopify/success?shop={shop}"
+    return RedirectResponse(url=redirect_frontend_url)
 
 @router.get("/install")
 def shopify_install(request: Request):
@@ -152,3 +159,16 @@ def get_shopify_orders(request: Request):
         raise HTTPException(status_code=response.status_code, detail="Failed to fetch orders")
 
     return response.json()
+
+@router.get("/", response_model=List[dict])
+async def list_shopify_cred(request: Request):
+    db = request.app.state.db
+    creds_cursor = db.shopify_cred.find()
+    creds = []
+    async for cred in creds_cursor:
+
+        if '_id' in cred:
+            cred['_id'] = str(cred['_id'])
+
+        creds.append(cred)
+    return creds
