@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException, Header
+from fastapi import APIRouter, Request, HTTPException, Header, status
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
 import hmac, hashlib, requests, base64
@@ -193,7 +193,11 @@ def register_shopify_webhook(shop: str, access_token: str):
             "format": "json"
         }
     }
-    response = requests.post(webhook_url, json=data, headers=headers)
+    try:
+        response = requests.post(webhook_url, json=data, headers=headers)
+    except requests.RequestException as e:
+        print(f"[!] Webhook request exception: {e}")
+        return False
 
     if response.status_code == 201:
         print(f"[✓] Webhook registered for {shop}")
@@ -202,56 +206,57 @@ def register_shopify_webhook(shop: str, access_token: str):
 
     return response.status_code == 201
 
-# Handle Shopify Webhook
 @router.post("/webhook/orders_create")
 async def shopify_orders_create_webhook(
     request: Request,
-    x_shopify_hmac_sha256: str = Header(None),
-    x_shopify_shop_domain: str = Header(None)
+    x_shopify_hmac_sha256: str = Header(...),
+    x_shopify_shop_domain: str = Header(...)
 ):
-    # Read raw request body
-    raw_body = await request.body()
+    try:
+        # Read raw request body
+        raw_body = await request.body()
 
-    # --- ✅ Webhook HMAC Verification (correct way) ---
-    calculated_hmac = base64.b64encode(
-        hmac.new(
-            SHOPIFY_API_SECRET.encode("utf-8"),
-            raw_body,
-            hashlib.sha256
-        ).digest()
-    ).decode()
+        # Webhook HMAC Verification
+        calculated_hmac = base64.b64encode(
+            hmac.new(
+                SHOPIFY_API_SECRET.encode("utf-8"),
+                raw_body,
+                hashlib.sha256
+            ).digest()
+        ).decode()
 
-    # Compare with header
-    if not hmac.compare_digest(calculated_hmac, x_shopify_hmac_sha256):
-        raise HTTPException(status_code=401, detail="Invalid HMAC")
+        if not hmac.compare_digest(calculated_hmac, x_shopify_hmac_sha256):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid HMAC")
 
-    # --- ✅ Parse and extract minimal order data ---
-    data = json.loads(raw_body)
+        # Parse and extract minimal order data
+        data = json.loads(raw_body)
+        order_document = {
+            "shop": x_shopify_shop_domain,
+            "order_id": data["id"],
+            "created_at": data.get("created_at"),
+            "customer": {
+                "id": data.get("customer", {}).get("id"),
+                "email": data.get("customer", {}).get("email"),
+                "name": f"{data.get('customer', {}).get('first_name', '')} {data.get('customer', {}).get('last_name', '')}".strip()
+            },
+            "line_items": [
+                {
+                    "product_id": item.get("product_id"),
+                    "name": item.get("name"),
+                    "quantity": item.get("quantity"),
+                    "price": item.get("price")
+                } for item in data.get("line_items", [])
+            ],
+            "total_price": data.get("total_price"),
+            "received_at": datetime.utcnow()
+        }
 
-    order_document = {
-        "shop": x_shopify_shop_domain,
-        "order_id": data["id"],
-        "created_at": data.get("created_at"),
-        "customer": {
-            "id": data.get("customer", {}).get("id"),
-            "email": data.get("customer", {}).get("email"),
-            "name": f"{data.get('customer', {}).get('first_name', '')} {data.get('customer', {}).get('last_name', '')}".strip()
-        },
-        "line_items": [
-            {
-                "product_id": item.get("product_id"),
-                "name": item.get("name"),
-                "quantity": item.get("quantity"),
-                "price": item.get("price")
-            } for item in data.get("line_items", [])
-        ],
-        "total_price": data.get("total_price"),
-        "received_at": datetime.utcnow()
-    }
+        db = request.app.state.db
+        # Prevent duplicates
+        if not db.orders.find_one({"order_id": order_document["order_id"]}):
+            db.orders.insert_one(order_document)
 
-    db = request.app.state.db
-    # --- ✅ Prevent duplicates (optional) ---
-    if not db.orders.find_one({"order_id": order_document["order_id"]}):
-        db.orders.insert_one(order_document)
-
-    return {"success": True}
+        return {"success": True}
+    except Exception as e:
+        # Log error here if you have a logger
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Webhook processing failed: {str(e)}")
