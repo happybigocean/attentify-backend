@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Header
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
 import hmac, hashlib, requests, base64
 import os
 from typing import List
+import datetime
+import json
+from bson import ObjectId
 
 router = APIRouter()
 
@@ -100,6 +103,9 @@ def shopify_callback(request: Request):
 
     access_token = response.json().get("access_token")
 
+    # Register the webhook
+    register_shopify_webhook(shop, access_token)
+
     db = request.app.state.db
     db.shopify_cred.update_one(
         {"shop": shop},
@@ -172,3 +178,80 @@ async def list_shopify_cred(request: Request):
 
         creds.append(cred)
     return creds
+
+# Register Shopify Webhook
+def register_shopify_webhook(shop: str, access_token: str):
+    webhook_url = f"https://{shop}/admin/api/2024-10/webhooks.json"
+    headers = {
+        "X-Shopify-Access-Token": access_token,
+        "Content-Type": "application/json"
+    }
+    data = {
+        "webhook": {
+            "topic": "orders/create",
+            "address": f"{BACKEND_URL}/api/v1/shopify/webhook/orders_create",
+            "format": "json"
+        }
+    }
+    response = requests.post(webhook_url, json=data, headers=headers)
+
+    if response.status_code == 201:
+        print(f"[✓] Webhook registered for {shop}")
+    else:
+        print(f"[!] Webhook failed: {response.status_code} {response.text}")
+
+    return response.status_code == 201
+
+# Handle Shopify Webhook
+@router.post("/webhook/orders_create")
+async def shopify_orders_create_webhook(
+    request: Request,
+    x_shopify_hmac_sha256: str = Header(None),
+    x_shopify_shop_domain: str = Header(None)
+):
+    # Read raw request body
+    raw_body = await request.body()
+
+    # --- ✅ Webhook HMAC Verification (correct way) ---
+    calculated_hmac = base64.b64encode(
+        hmac.new(
+            SHOPIFY_API_SECRET.encode("utf-8"),
+            raw_body,
+            hashlib.sha256
+        ).digest()
+    ).decode()
+
+    # Compare with header
+    if not hmac.compare_digest(calculated_hmac, x_shopify_hmac_sha256):
+        raise HTTPException(status_code=401, detail="Invalid HMAC")
+
+    # --- ✅ Parse and extract minimal order data ---
+    data = json.loads(raw_body)
+
+    order_document = {
+        "shop": x_shopify_shop_domain,
+        "order_id": data["id"],
+        "created_at": data.get("created_at"),
+        "customer": {
+            "id": data.get("customer", {}).get("id"),
+            "email": data.get("customer", {}).get("email"),
+            "name": f"{data.get('customer', {}).get('first_name', '')} {data.get('customer', {}).get('last_name', '')}".strip()
+        },
+        "line_items": [
+            {
+                "product_id": item.get("product_id"),
+                "name": item.get("name"),
+                "quantity": item.get("quantity"),
+                "price": item.get("price")
+            } for item in data.get("line_items", [])
+        ],
+        "total_price": data.get("total_price"),
+        "received_at": datetime.utcnow()
+    }
+
+    db = request.app.state.db
+    # --- ✅ Prevent duplicates (optional) ---
+    if not db.orders.find_one({"order_id": order_document["order_id"]}):
+        db.orders.insert_one(order_document)
+
+    return {"success": True}
