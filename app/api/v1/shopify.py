@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 import hmac, hashlib, requests, base64
 import os
 from typing import List
-import datetime
+from datetime import datetime
 import json
 from bson import ObjectId
 from app.services.shopify_service import (
@@ -248,8 +248,19 @@ async def shopify_orders_create_webhook(
             "customer": {
                 "id": data.get("customer", {}).get("id"),
                 "email": data.get("customer", {}).get("email"),
-                "name": f"{data.get('customer', {}).get('first_name', '')} {data.get('customer', {}).get('last_name', '')}".strip()
+                "name": f"{data.get('customer', {}).get('first_name', '')} {data.get('customer', {}).get('last_name', '')}".strip(),
+                "phone": data.get("customer", {}).get("phone"),
+                "default_address": {
+                    "address1": data.get("customer", {}).get("default_address", {}).get("address1"),
+                    "address2": data.get("customer", {}).get("default_address", {}).get("address2"),
+                    "city": data.get("customer", {}).get("default_address", {}).get("city"),
+                    "province": data.get("customer", {}).get("default_address", {}).get("province"),
+                    "country": data.get("customer", {}).get("default_address", {}).get("country"),
+                    "zip": data.get("customer", {}).get("default_address", {}).get("zip"),
+                }
             },
+            "shipping_address": data.get("shipping_address", {}),
+            "billing_address": data.get("billing_address", {}),
             "line_items": [
                 {
                     "product_id": item.get("product_id"),
@@ -259,7 +270,9 @@ async def shopify_orders_create_webhook(
                 } for item in data.get("line_items", [])
             ],
             "total_price": data.get("total_price"),
-            "received_at": datetime.utcnow()
+            "payment_status": data.get("financial_status"),
+            "fulfillment_status": data.get("fulfillment_status"),
+            "updated_at": data.get("updated_at")
         }
 
         db = await get_database()

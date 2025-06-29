@@ -71,8 +71,19 @@ async def upsert_orders(db, shop, orders):
             "customer": {
                 "id": order.get("customer", {}).get("id"),
                 "email": order.get("customer", {}).get("email"),
-                "name": f"{order.get('customer', {}).get('first_name', '')} {order.get('customer', {}).get('last_name', '')}".strip()
+                "name": f"{order.get('customer', {}).get('first_name', '')} {order.get('customer', {}).get('last_name', '')}".strip(),
+                "phone": order.get("customer", {}).get("phone"),
+                "default_address": {
+                    "address1": order.get("customer", {}).get("default_address", {}).get("address1"),
+                    "address2": order.get("customer", {}).get("default_address", {}).get("address2"),
+                    "city": order.get("customer", {}).get("default_address", {}).get("city"),
+                    "province": order.get("customer", {}).get("default_address", {}).get("province"),
+                    "country": order.get("customer", {}).get("default_address", {}).get("country"),
+                    "zip": order.get("customer", {}).get("default_address", {}).get("zip"),
+                }
             },
+            "shipping_address": order.get("shipping_address", {}),
+            "billing_address": order.get("billing_address", {}),
             "total_price": order.get("total_price"),
             "payment_status": order.get("financial_status"),
             "fulfillment_status": order.get("fulfillment_status"),
