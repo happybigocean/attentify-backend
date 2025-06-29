@@ -240,7 +240,7 @@ async def shopify_orders_create_webhook(
         data = json.loads(raw_body)
         print(f"[✓] x_shopify_shop_domain: {x_shopify_shop_domain}")
         order_document = {
-            "shop": x_shopify_shop_domain | "",
+            "shop": x_shopify_shop_domain,
             "order_id": data["id"],
             "order_number": data.get("order_number"),
             "name": data.get("name"),
@@ -262,7 +262,7 @@ async def shopify_orders_create_webhook(
             "received_at": datetime.utcnow()
         }
 
-        db = get_database()
+        db = await get_database()
         # async Motor: must await db operations
         print(f"[✓] Inserting/updating order: {order_document['order_id']} in shop: {order_document['shop']}")
         if not await db.orders.find_one({"order_id": order_document["order_id"]}):
