@@ -220,26 +220,28 @@ async def shopify_orders_create_webhook(
     x_shopify_shop_domain: str = Header(...)
 ):
     try:
-        # Read raw request body
         raw_body = await request.body()
 
-        # Webhook HMAC Verification
-        calculated_hmac = base64.b64encode(
+        # --- HMAC Verification ---
+        computed_hmac = base64.b64encode(
             hmac.new(
                 SHOPIFY_API_SECRET.encode("utf-8"),
                 raw_body,
                 hashlib.sha256
             ).digest()
         ).decode()
-
-        if not hmac.compare_digest(calculated_hmac, x_shopify_hmac_sha256):
+        print(f"[✓] x_shopify_hmac_sha256: {x_shopify_hmac_sha256}")
+        print(f"[✓] Computed HMAC: {computed_hmac}")
+        # Shopify sends the HMAC header as base64 (case-insensitive)
+        if not hmac.compare_digest(computed_hmac, x_shopify_hmac_sha256):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid HMAC")
 
-        # Parse and extract minimal order data
         data = json.loads(raw_body)
         order_document = {
             "shop": x_shopify_shop_domain,
             "order_id": data["id"],
+            "order_number": data.get("order_number"),
+            "name": data.get("name"),
             "created_at": data.get("created_at"),
             "customer": {
                 "id": data.get("customer", {}).get("id"),
@@ -259,13 +261,12 @@ async def shopify_orders_create_webhook(
         }
 
         db = request.app.state.db
-        # Prevent duplicates
-        if not db.orders.find_one({"order_id": order_document["order_id"]}):
-            db.orders.insert_one(order_document)
+        # async Motor: must await db operations
+        if not await db.orders.find_one({"order_id": order_document["order_id"]}):
+            await db.orders.insert_one(order_document)
 
         return {"success": True}
     except Exception as e:
-        # Log error here if you have a logger
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Webhook processing failed: {str(e)}")
     
 # Endpoint: Get all orders (for all stores)
