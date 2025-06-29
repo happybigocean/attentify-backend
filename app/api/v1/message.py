@@ -144,8 +144,17 @@ async def analyze_email_message(
 
     result = await analyze_emails_with_ai(doc)
     # result is now a single dict, not a list
-
+    
     order_info = json.loads(result["response"])
+    order_id = str(order_info.get("order_id", ""))
+    order_name = order_id if order_id.startswith("#") else "#" + order_id
+
+    db_order = await db["orders"].find_one({"name": order_name})
+    if db_order:
+        db_order["_id"] = str(db_order["_id"])
+        order_info["shopify_order"] = db_order
+    else:
+        order_info["msg"] = "Order not found"
     return order_info
 
 @router.post("/{id}/reply", response_model=dict)
@@ -182,7 +191,7 @@ async def reply_to_message(
 
     if not agent_id:
         raise HTTPException(status_code=400, detail="No Gmail user found in participants.")
-    print(agent_id)
+
     _, agent_email = parseaddr(agent_id)
     user_creds = await db["gmail_accounts"].find_one({"email": agent_email})
     if not user_creds:

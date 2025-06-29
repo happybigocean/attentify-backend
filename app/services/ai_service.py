@@ -55,24 +55,39 @@ async def analyze_emails_with_ai(message: Dict[str, Any]):
     Args:
         message: A Message object or dict, which has a 'messages' field containing ChatEntry dicts.
     Returns:
-        Single AI JSON output for the last 3 messages combined.
+        Single AI JSON output for the last 3 messages combined, or an error message.
     """
-    entries = message.get("messages", [])
-    if not entries:
-        return None  # or {} or custom error
+    try:
+        entries = message.get("messages", [])
+        if not entries:
+            return {"error": "No messages found in input."}
 
-    # Get the last 3 entries (or fewer if not enough)
-    last_entries = entries[-3:]
-    # Combine their contents, e.g. join with linebreak
-    combined_content = "\n\n".join(entry.get("content", "") for entry in last_entries)
-    # base64 encode the combined email body
-    encoded_content = base64.b64encode(combined_content.encode("utf-8")).decode("utf-8")
-    # Prepare the prompt
-    prompt = prompt_template.format(email_contents=encoded_content)
-    # Call the LLM synchronously (langchain-anthropic currently does not support async)
-    result = llm.invoke(prompt)
-    # Return a single result dict (not a list)
-    return {
-        "entry_ids": [entry.get("metadata", {}).get("gmail_id") for entry in last_entries],
-        "response": result.content
-    }
+        # Get the last 3 entries (or fewer if not enough)
+        last_entries = entries[-3:]
+        try:
+            combined_content = "\n\n".join(entry.get("content", "") for entry in last_entries)
+        except Exception as content_exc:
+            return {"error": f"Failed to combine message contents: {content_exc}"}
+
+        try:
+            encoded_content = base64.b64encode(combined_content.encode("utf-8")).decode("utf-8")
+        except Exception as encode_exc:
+            return {"error": f"Failed to encode contents: {encode_exc}"}
+
+        try:
+            prompt = prompt_template.format(email_contents=encoded_content)
+        except Exception as prompt_exc:
+            return {"error": f"Failed to format prompt: {prompt_exc}"}
+
+        try:
+            # Call the LLM synchronously (langchain-anthropic currently does not support async)
+            result = llm.invoke(prompt)
+        except Exception as llm_exc:
+            return {"error": f"LLM invocation failed: {llm_exc}"}
+
+        return {
+            "entry_ids": [entry.get("metadata", {}).get("gmail_id") for entry in last_entries],
+            "response": getattr(result, 'content', str(result))
+        }
+    except Exception as e:
+        return {"error": f"Unexpected error: {e}"}
