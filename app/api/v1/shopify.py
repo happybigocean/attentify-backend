@@ -234,9 +234,11 @@ async def shopify_orders_create_webhook(
         print(f"[✓] Computed HMAC: {computed_hmac}")
         # Shopify sends the HMAC header as base64 (case-insensitive)
         if not hmac.compare_digest(computed_hmac, x_shopify_hmac_sha256):
+            print("[!] Invalid HMAC received")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid HMAC")
-
+        
         data = json.loads(raw_body)
+        print(f"[✓] Webhook data: {data}")
         order_document = {
             "shop": x_shopify_shop_domain,
             "order_id": data["id"],
