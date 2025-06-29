@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Request, HTTPException, Header, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Request, HTTPException, Header, status, BackgroundTasks
+from fastapi.responses import RedirectResponse, JSONResponse
 from urllib.parse import urlencode
 import hmac, hashlib, requests, base64
 import os
@@ -7,6 +7,13 @@ from typing import List
 import datetime
 import json
 from bson import ObjectId
+from app.services.shopify_service import (
+    get_all_shopify_creds,
+    fetch_orders_from_shop,
+    upsert_orders,
+)
+
+from app.db.mongodb import get_database  # Assuming you have a MongoDB connection setup in mongodb.py
 
 router = APIRouter()
 
@@ -141,7 +148,7 @@ def decode_host_func(base64_host: str) -> str:
         return ""
     
 #/api/v1/shopify/orders
-@router.get("/orders")
+@router.get("/orders1")
 def get_shopify_orders(request: Request):
     shop = request.query_params.get("shop")
     if not shop:
@@ -260,3 +267,33 @@ async def shopify_orders_create_webhook(
     except Exception as e:
         # Log error here if you have a logger
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Webhook processing failed: {str(e)}")
+    
+# Endpoint: Get all orders (for all stores)
+@router.get("/orders", response_model=List[dict])
+async def get_orders(request: Request):
+    db = request.app.state.db
+    # Use async for to iterate, or to_list() to get list at once
+    orders_cursor = db.orders.find({}, {"_id": 0})
+    orders = await orders_cursor.to_list(length=1000)  # or whatever max size you want
+    return orders
+
+# Endpoint: Sync orders from all stores
+@router.post("/orders/sync")
+def sync_orders(background_tasks: BackgroundTasks):
+    background_tasks.add_task(sync_all_stores_orders)
+    return {"msg": "Sync started."}
+
+# Background job: fetch and upsert all orders for all stores
+async def sync_all_stores_orders():
+    db = await get_database()
+    creds = await get_all_shopify_creds(db)
+    for cred in creds:
+        shop = cred.get("shop")
+        access_token = cred.get("access_token")
+        if not shop or not access_token:
+            continue
+        try:
+            orders = await fetch_orders_from_shop(shop, access_token)
+            await upsert_orders(db, shop, orders)
+        except Exception as e:
+            print(f"Error syncing {shop}: {e}")
