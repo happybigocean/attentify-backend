@@ -238,9 +238,9 @@ async def shopify_orders_create_webhook(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid HMAC")
         
         data = json.loads(raw_body)
-        print(f"[✓] Webhook data: {data}")
+        print(f"[✓] x_shopify_shop_domain: {x_shopify_shop_domain}")
         order_document = {
-            "shop": x_shopify_shop_domain,
+            "shop": x_shopify_shop_domain | "",
             "order_id": data["id"],
             "order_number": data.get("order_number"),
             "name": data.get("name"),
@@ -262,13 +262,16 @@ async def shopify_orders_create_webhook(
             "received_at": datetime.utcnow()
         }
 
-        db = request.app.state.db
+        db = get_database()
         # async Motor: must await db operations
+        print(f"[✓] Inserting/updating order: {order_document['order_id']} in shop: {order_document['shop']}")
         if not await db.orders.find_one({"order_id": order_document["order_id"]}):
+            print(f"[✓] Order {order_document['order_id']} not found, inserting new document.")
             await db.orders.insert_one(order_document)
 
         return {"success": True}
     except Exception as e:
+        print(f"[!] Error processing webhook: {str(e)}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Webhook processing failed: {str(e)}")
     
 # Endpoint: Get all orders (for all stores)
