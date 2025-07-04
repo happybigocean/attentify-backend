@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Form
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
@@ -10,13 +10,10 @@ router = APIRouter()
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from app.models.message import Message, ChatEntry
-from app.db.mongodb import get_database
 
-db = get_database()
-messages_col = db["messages"]
 
 # api/v1/webhooks/twilio/sms
-router.post("/twilio/sms", response_class=PlainTextResponse)
+@router.post("/twilio/sms", response_class=PlainTextResponse)
 async def twilio_sms_webhook(
     From: str = Form(...),
     To: str = Form(...),
@@ -24,11 +21,13 @@ async def twilio_sms_webhook(
     MessageSid: str = Form(...),
     SmsSid: str = Form(...),
     SmsMessageSid: str = Form(None),
+    request: Request = None,
 ):
     thread_id = From  # Or customize: e.g. f"{From}:{To}"
 
     # Try to find the existing thread
-    doc = await messages_col.find_one({"thread_id": thread_id, "channel": "sms"})
+    db = request.app.state.db
+    doc = await db.messages.find_one({"thread_id": thread_id, "channel": "sms"})
     now = datetime.utcnow()
 
     chat_entry = ChatEntry(
@@ -48,7 +47,7 @@ async def twilio_sms_webhook(
 
     if doc:
         # Update thread: add new entry, update last_updated
-        await messages_col.update_one(
+        await db.messages.update_one(
             {"_id": doc["_id"]},
             {
                 "$push": {"messages": chat_entry.dict()},
@@ -67,7 +66,7 @@ async def twilio_sms_webhook(
             last_updated=now,
             messages=[chat_entry],
         )
-        await messages_col.insert_one(msg_obj.dict(by_alias=True))
+        await db.messages.insert_one(msg_obj.dict(by_alias=True))
 
     # Respond with TwiML
     return "<Response/>"

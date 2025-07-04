@@ -1,12 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from twilio.rest import Client
 from datetime import datetime
 from bson import ObjectId
-from models import Message, ChatEntry  # assuming these are in models.py
-
-from db import messages_collection  # assuming this is your MongoDB collection
+from app.models.message import Message, ChatEntry  # assuming these are in models.py
 import os
 
 router = APIRouter()
@@ -25,7 +23,7 @@ class SMSRequest(BaseModel):
 
 # api/v1/twilio/send-sms
 @router.post("/send-sms")
-async def send_sms(data: SMSRequest):
+async def send_sms(data: SMSRequest, request: Request):
     try:
         # Send SMS
         message = client.messages.create(
@@ -44,10 +42,11 @@ async def send_sms(data: SMSRequest):
             message_type="text",
             metadata={"twilio_sid": message.sid}
         )
-
+        
+        db = request.app.state.db
         # Upsert Message document (either new or existing thread)
         if data.thread_id:
-            result = await messages_collection.update_one(
+            result = await db.messages.update_one(
                 {"thread_id": data.thread_id},
                 {
                     "$push": {"messages": chat_entry.dict()},
@@ -63,7 +62,7 @@ async def send_sms(data: SMSRequest):
                 channel="sms",
                 messages=[chat_entry]
             )
-            result = await messages_collection.insert_one(new_message.dict(by_alias=True))
+            result = await db.messages.insert_one(new_message.dict(by_alias=True))
 
         return {
             "sid": message.sid,
