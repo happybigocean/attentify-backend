@@ -15,6 +15,7 @@ from app.db.mongodb import get_database
 db = get_database()
 messages_col = db["messages"]
 
+# api/v1/webhooks/twilio/sms
 router.post("/twilio/sms", response_class=PlainTextResponse)
 async def twilio_sms_webhook(
     From: str = Form(...),

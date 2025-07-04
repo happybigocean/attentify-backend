@@ -55,9 +55,11 @@ app.include_router(shopify.router, prefix="/api/v1/shopify", tags=["Shopify"])
 #app.include_router(inbox.router, prefix="/api/v1/inbox", tags=["Inbox"])
 #app.include_router(ai.router, prefix="/api/v1/ai", tags=["AI"])
 #app.include_router(templates.router, prefix="/api/v1/templates", tags=["Templates"])
-#app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["Webhooks"])
+from app.api.v1 import webhooks
+app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["Webhooks"])
 #app.include_router(shopify.router, prefix="/api/v1/shopify", tags=["Shopify"])
-#app.include_router(twilio.router, prefix="/api/v1/twilio", tags=["Twilio"])
+from app.api.v1 import twilio
+app.include_router(twilio.router, prefix="/api/v1/twilio", tags=["Twilio"])
 
 #app.include_router(stripe.router, prefix="/api/v1/stripe", tags=["Stripe"])
 
