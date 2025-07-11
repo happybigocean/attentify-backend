@@ -16,6 +16,7 @@ from email.utils import formatdate, format_datetime
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
 from email.utils import parseaddr
+from pymongo import DESCENDING
 
 router = APIRouter()
 
@@ -67,7 +68,9 @@ def doc_to_message_detail(doc: dict) -> Message:
 
 @router.get("/", response_model=List[dict])
 async def get_messages(db=Depends(get_database)):
-    cursor = db["messages"].find({})
+    # Sort by 'last_updated' in descending order
+    cursor = db["messages"].find({}).sort("last_updated", DESCENDING)
+
     messages = []
     async for doc in cursor:
         doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
@@ -76,7 +79,7 @@ async def get_messages(db=Depends(get_database)):
         cleaned_client_id = extract_name(raw_client_id)
         doc["client_id"] = cleaned_client_id
 
-        doc.pop("messages", None)  # <- Remove the 'messages' field if it exists
+        doc.pop("messages", None)  # Remove the 'messages' field if it exists
 
         messages.append(doc)
     return messages
