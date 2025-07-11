@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import PlainTextResponse
+from twilio.twiml.messaging_response import MessagingResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 from datetime import datetime
@@ -13,7 +14,7 @@ from app.models.message import Message, ChatEntry
 
 
 # api/v1/webhooks/twilio/sms
-@router.post("/twilio/sms", response_class=PlainTextResponse)
+@router.post("/twilio/sms", response_class=MessagingResponse)
 async def twilio_sms_webhook(
     From: str = Form(...),
     To: str = Form(...),
@@ -68,5 +69,7 @@ async def twilio_sms_webhook(
         )
         await db.messages.insert_one(msg_obj.dict(by_alias=True))
 
-    # Respond with TwiML
-    return "<Response/>"
+    resp = MessagingResponse()
+    # Add a text message
+    msg = resp.message("We've got your message!, we'll get back to you soon.")
+    return str(resp)
