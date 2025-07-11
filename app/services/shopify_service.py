@@ -96,8 +96,7 @@ async def upsert_orders(db, shop, orders):
                 }
                 for item in order.get("line_items", [])
             ],
-            "updated_at": order.get("updated_at"),
-            "synced_at": datetime.utcnow()
+            "updated_at": order.get("updated_at")
         }
         bulk_ops.append(
             UpdateOne(
