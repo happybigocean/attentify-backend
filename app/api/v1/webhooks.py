@@ -33,14 +33,16 @@ async def twilio_sms_webhook(
         sender=From,
         recipient=To,
         content=Body,
-        title=None,
-        timestamp=now,
+        title=Body,
         channel="sms",
         message_type="text",
         metadata={
             "MessageSid": MessageSid,
             "SmsSid": SmsSid,
-            "SmsMessageSid": SmsMessageSid
+            "SmsMessageSid": SmsMessageSid,
+            "from": From,
+            "to": To,
+            "date": now
         }
     )
 
