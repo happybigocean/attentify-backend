@@ -1,28 +1,36 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime
-from app.models.user import User, UserCreate, UserInDB, Token
+from app.models.user import UserCreate, Token
 from app.core.security import verify_password, get_password_hash, create_access_token
 
 router = APIRouter()
 
-#/api/v1/auth/register
+VALID_ROLES = {"admin", "store_owner", "agent", "readonly"}
+
+# /api/v1/auth/register
 @router.post("/register")
 async def register(user: UserCreate, request: Request):
     db = request.app.state.db
     existing = await db.users.find_one({"email": user.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
+    role = user.role if user.role in VALID_ROLES else "readonly"
     hashed_password = get_password_hash(user.password)
+    now = datetime.utcnow()
 
     user_doc = {
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "role": user.role or "user",
+        "role": role,
+        "status": "active",
         "hashed_password": hashed_password,
-        "created_at": datetime.utcnow(),
+        "team_id": None,
+        "created_at": now,
+        "updated_at": now,
+        "last_login": now,
     }
 
     await db.users.insert_one(user_doc)
@@ -34,11 +42,12 @@ async def register(user: UserCreate, request: Request):
         "user": {
             "name": f"{user.first_name} {user.last_name}",
             "email": user.email,
-            "role": user.role or "user"
+            "role": role,
+            "status": "active"
         }
     }
 
-#/api/v1/auth/login
+# /api/v1/auth/login
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Request = None):
     db = request.app.state.db
@@ -47,13 +56,22 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Reque
     if not user or not verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
     
+    if user.get("status") == "suspended":
+        raise HTTPException(status_code=403, detail="Account suspended. Contact admin.")
+
+    await db.users.update_one(
+        {"email": user["email"]},
+        {"$set": {"last_login": datetime.utcnow()}}
+    )
+
     token = create_access_token(data={"sub": user["email"]})
-    
+
     return {
         "token": token,
         "user": {
             "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
             "email": user["email"],
-            "role": user.get("role", "user")
+            "role": user.get("role", "readonly"),
+            "status": user.get("status", "active")
         }
     }

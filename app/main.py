@@ -51,7 +51,8 @@ from app.api.v1 import message
 app.include_router(message.router, prefix="/api/v1/message", tags=["Message"])
 from app.api.v1 import shopify
 app.include_router(shopify.router, prefix="/api/v1/shopify", tags=["Shopify"])
-#app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
+from app.api.v1 import users
+app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 #app.include_router(inbox.router, prefix="/api/v1/inbox", tags=["Inbox"])
 #app.include_router(ai.router, prefix="/api/v1/ai", tags=["AI"])
 #app.include_router(templates.router, prefix="/api/v1/templates", tags=["Templates"])

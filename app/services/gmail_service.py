@@ -20,6 +20,7 @@ async def fetch_and_save_gmail(account: dict, db):
 
     # Token expiration check
     expires_at = account.get("expires_at")
+    
     token_expired = False
     if expires_at:
         try:

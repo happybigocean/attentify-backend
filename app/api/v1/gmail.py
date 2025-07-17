@@ -159,5 +159,5 @@ async def google_oauth_callback(request: Request, code: Optional[str] = None, er
     else:
         await db.gmail_accounts.insert_one(account_data)
 
-    redirect_url = f"{FRONTEND_URL}/accounts"
+    redirect_url = f"{FRONTEND_URL}/accounts/gmail"
     return RedirectResponse(url=redirect_url)
