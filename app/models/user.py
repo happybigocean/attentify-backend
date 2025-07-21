@@ -2,18 +2,25 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Literal
 from datetime import datetime
 
-# Shared base user fields
 class UserBase(BaseModel):
     email: EmailStr
     first_name: str
     last_name: str
     role: Literal["admin", "store_owner", "agent", "readonly"] = "readonly"
     status: Literal["active", "invited", "suspended"] = "invited"
-    team_id: Optional[str] = None  # For grouping users by store
+    team_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
 
+class User(UserBase):
+    id: str = Field(..., alias="_id")
+    _id: str
+
+    class Config:
+        allow_population_by_field_name = True
+        orm_mode = True
+        
 # For user creation (includes password)
 class UserCreate(UserBase):
     password: str
