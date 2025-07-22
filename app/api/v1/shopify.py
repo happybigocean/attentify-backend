@@ -57,7 +57,7 @@ shopify_auth_helper = ShopifyAuthHelper(SHOPIFY_API_KEY, SHOPIFY_API_SECRET)
 
 #/api/v1/shopify/auth
 @router.get("/auth")
-def shopify_auth(request: Request):
+def shopify_auth(request: Request, current_user: Dict = Depends(get_current_user)):
     """
     Redirect user to Shopify OAuth consent page
     """
@@ -71,7 +71,30 @@ def shopify_auth(request: Request):
     #    f"&scope={quote(SHOPIFY_SCOPE)}&redirect_uri={quote(SHOPIFY_REDIRECT_URI)}"
     #)
 
-    return RedirectResponse(SHOPIFY_INSTALL_URL)
+    user_id = str(current_user["_id"])
+    params = {
+        "state" : user_id,
+    }
+    full_install_url = f"{SHOPIFY_INSTALL_URL}?{urlencode(params)}"
+    return RedirectResponse(url=full_install_url)
+
+@router.get("/install")
+def shopify_install(
+    request: Request, 
+):
+    params = dict(request.query_params)
+    state = params.get("state")
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing 'state' parameter")
+    shop = params.get("shop")
+    hmac = params.get("hmac")
+    if not shop or not hmac:
+        raise HTTPException(status_code=400, detail="Missing 'shop' or 'hmac' parameter")
+    
+    user_id = state
+    redirect_uri = f"{BACKEND_URL}/api/v1/shopify/callback?user_id={user_id}"
+    auth_url = shopify_auth_helper.build_authorization_url(shop, redirect_uri)
+    return RedirectResponse(url=auth_url)
 
 #/api/v1/shopify/callback
 @router.get("/callback")
@@ -130,21 +153,6 @@ def shopify_callback(request: Request):
 
     redirect_frontend_url = f"{FRONTEND_URL}/shopify/success?shop={shop}"
     return RedirectResponse(url=redirect_frontend_url)
-
-@router.get("/install")
-def shopify_install(
-    request: Request, 
-    current_user: Dict = Depends(get_current_user)
-):
-    params = dict(request.query_params)
-    shop = params.get("shop")
-    hmac = params.get("hmac")
-    if not shop or not hmac:
-        raise HTTPException(status_code=400, detail="Missing 'shop' or 'hmac' parameter")
-
-    redirect_uri = f"{BACKEND_URL}/api/v1/shopify/callback?user_id={current_user['id']}"
-    auth_url = shopify_auth_helper.build_authorization_url(shop, redirect_uri)
-    return RedirectResponse(url=auth_url)
 
 def decode_host_func(base64_host: str) -> str:
     try:
