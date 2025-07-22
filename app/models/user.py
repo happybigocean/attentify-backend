@@ -6,8 +6,8 @@ class UserBase(BaseModel):
     email: EmailStr
     first_name: str
     last_name: str
-    role: Literal["admin", "store_owner", "agent", "readonly"] = "readonly"
-    status: Literal["active", "invited", "suspended"] = "invited"
+    role: Literal["admin", "store_owner", "agent", "readonly"] = "store_owner"
+    status: Literal["active", "invited", "suspended"] = "active"
     team_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
