@@ -132,12 +132,13 @@ def shopify_callback(request: Request):
 
     db = request.app.state.db
     db.shopify_cred.update_one(
-        {"shop": shop},
+        {"shop": shop, "user_id": ObjectId(user_id)},
         {
             "$set": {
+                "shop": shop,  # ← add this
                 "access_token": access_token,
                 "status": "connected",
-                "user_id": ObjectId(user_id)  # <-- Save user_id properly
+                "user_id": ObjectId(user_id)
             }
         },
         upsert=True
