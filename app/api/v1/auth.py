@@ -33,13 +33,14 @@ async def register(user: UserCreate, request: Request):
         "last_login": now,
     }
 
-    await db.users.insert_one(user_doc)
+    result = await db.users.insert_one(user_doc)  # Capture insert result
 
     token = create_access_token(data={"sub": user.email})
 
     return {
         "token": token,
         "user": {
+            "id": str(result.inserted_id),  # <-- include inserted user ID here
             "name": f"{user.first_name} {user.last_name}",
             "email": user.email,
             "role": role,
@@ -69,6 +70,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Reque
     return {
         "token": token,
         "user": {
+            "id": str(user["_id"]),  # <-- added user_id here as string
             "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
             "email": user["email"],
             "role": user.get("role", "readonly"),

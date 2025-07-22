@@ -23,15 +23,29 @@ async def create_gmail_account(account: GmailAccountCreate, request: Request):
     existing = await db.gmail_accounts.find_one({"email": account.email})
     if existing:
         raise HTTPException(status_code=400, detail="Gmail account already registered")
-    account_dict = account.dict()
+
+    # Ensure user_id is a valid ObjectId
+    try:
+        account_dict = account.dict()
+        account_dict["user_id"] = ObjectId(account.user_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user_id format")
+
     result = await db.gmail_accounts.insert_one(account_dict)
     account_dict["id"] = str(result.inserted_id)
-    return account_dict
+    return gmail_account_helper(account_dict)
 
 @router.get("/", response_model=List[GmailAccountInDB])
-async def list_gmail_accounts(request: Request):
+async def list_gmail_accounts(request: Request, user_id: str):
     db = request.app.state.db
-    accounts_cursor = db.gmail_accounts.find()
+
+    # Validate user_id format
+    try:
+        user_obj_id = ObjectId(user_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user_id format")
+
+    accounts_cursor = db.gmail_accounts.find({"user_id": user_obj_id})
     accounts = []
     async for account in accounts_cursor:
         accounts.append(gmail_account_helper(account))
@@ -49,11 +63,20 @@ async def get_gmail_account(account_id: str, request: Request):
 async def update_gmail_account(account_id: str, update: GmailAccountUpdate, request: Request):
     db = request.app.state.db
     update_data = {k: v for k, v in update.dict().items() if v is not None}
+
+    if "user_id" in update_data:
+        try:
+            update_data["user_id"] = ObjectId(update_data["user_id"])
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid user_id format")
+
     if not update_data:
         raise HTTPException(status_code=400, detail="No data provided for update")
+
     result = await db.gmail_accounts.update_one({"_id": ObjectId(account_id)}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Gmail account not found")
+
     account = await db.gmail_accounts.find_one({"_id": ObjectId(account_id)})
     return gmail_account_helper(account)
 
@@ -76,32 +99,43 @@ GOOGLE_SCOPE = "https://www.googleapis.com/auth/gmail.readonly https://www.googl
 
 #/api/v1/gmail/oauth/login
 @router.get("/oauth/login")
-async def google_oauth_login():
+async def google_oauth_login(user_id: str):
     """
-    Redirect user to Google OAuth consent page
+    Starts the OAuth flow by redirecting to Google with the user's ID in state
     """
-    params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
-        "response_type": "code",
-        "scope": GOOGLE_SCOPE,
-        "access_type": "offline",
-        "prompt": "consent",  # To ensure refresh token returned
-    }
-    url = GOOGLE_AUTH_URL + "?" + urlencode(params)
-    return RedirectResponse(url)
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user_id format")
+
+    auth_url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={GOOGLE_REDIRECT_URI}"
+        f"&response_type=code"
+        f"&scope=email%20profile%20https://www.googleapis.com/auth/gmail.readonly%20https://www.googleapis.com/auth/gmail.send%20https://www.googleapis.com/auth/userinfo.email"
+        f"&state={user_id}"  # ✅ Attach user_id here
+        f"&access_type=offline"
+        f"&prompt=consent"
+    )
+    return RedirectResponse(url=auth_url)
 
 #/api/v1/gmail/oauth/callback
 @router.get("/oauth/callback")
-async def google_oauth_callback(request: Request, code: Optional[str] = None, error: Optional[str] = None):
-    """
-    Handle OAuth callback from Google, exchange code for tokens and store account
-    """
+async def google_oauth_callback(
+    request: Request,
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    state: Optional[str] = None,  # ✅ Capture the state
+):
     if error:
         raise HTTPException(status_code=400, detail=f"OAuth error: {error}")
 
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    if not state or not ObjectId.is_valid(state):
+        raise HTTPException(status_code=400, detail="Missing or invalid user_id (state)")
+
+    user_id = ObjectId(state)  # ✅ Extract and validate user_id
 
     # Exchange authorization code for tokens
     async with httpx.AsyncClient() as client:
@@ -122,14 +156,14 @@ async def google_oauth_callback(request: Request, code: Optional[str] = None, er
 
     access_token = token_data.get("access_token")
     refresh_token = token_data.get("refresh_token")
-    expires_in = token_data.get("expires_in")  # seconds
+    expires_in = token_data.get("expires_in")
 
     if not access_token or not refresh_token:
         raise HTTPException(status_code=400, detail="Missing access or refresh token")
 
     expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
 
-    # Use access token to get user's email info
+    # Get user info
     async with httpx.AsyncClient() as client:
         userinfo_resp = await client.get(
             "https://www.googleapis.com/oauth2/v3/userinfo",
@@ -141,11 +175,13 @@ async def google_oauth_callback(request: Request, code: Optional[str] = None, er
     if not email:
         raise HTTPException(status_code=400, detail="Failed to retrieve user email from Google")
 
-    # Save or update Gmail account in DB, now including client_id and client_secret
+    # Save/update Gmail account
     db = request.app.state.db
-    existing = await db.gmail_accounts.find_one({"email": email})
+    existing = await db.gmail_accounts.find_one({"email": email, "user_id": user_id})
+
     account_data = {
         "email": email,
+        "user_id": user_id,
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "Bearer",
@@ -153,11 +189,13 @@ async def google_oauth_callback(request: Request, code: Optional[str] = None, er
         "status": "connected",
         "client_id": GOOGLE_CLIENT_ID,
         "client_secret": GOOGLE_CLIENT_SECRET,
+        "token_issued_at": datetime.utcnow(),
+        "provider": "google",
     }
+
     if existing:
         await db.gmail_accounts.update_one({"_id": existing["_id"]}, {"$set": account_data})
     else:
         await db.gmail_accounts.insert_one(account_data)
 
-    redirect_url = f"{FRONTEND_URL}/accounts/gmail"
-    return RedirectResponse(url=redirect_url)
+    return RedirectResponse(url=f"{FRONTEND_URL}/accounts/gmail")

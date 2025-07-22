@@ -51,7 +51,6 @@ async def create_user(user: UserBase, db: Collection = Depends(get_database)):
         created_user["updated_at"] = created_user["updated_at"].isoformat()
     return created_user
 
-
 @router.put("/{user_id}")
 async def update_user(user_id: str, user: UserBase, db: Collection = Depends(get_database)):
     from bson import ObjectId
