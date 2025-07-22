@@ -12,6 +12,7 @@ from app.db.mongodb import get_database
 origins = os.getenv("ORIGINS", "http://localhost:5173").split(",")
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "attentify")
+from starlette.middleware.sessions import SessionMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,7 +33,7 @@ async def lifespan(app: FastAPI):
     mongo_client.close()
 
 app = FastAPI(title="Attentify APP", lifespan=lifespan)
-
+app.add_middleware(SessionMiddleware, secret_key="supersecret")
 # CORS setup
 app.add_middleware(
     CORSMiddleware,

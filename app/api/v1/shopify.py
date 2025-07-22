@@ -57,7 +57,7 @@ shopify_auth_helper = ShopifyAuthHelper(SHOPIFY_API_KEY, SHOPIFY_API_SECRET)
 
 #/api/v1/shopify/auth
 @router.get("/auth")
-def shopify_auth(user_id: str = Query(...)):
+def shopify_auth(request: Request, user_id: str = Query(...)):
     """
     Redirect user to Shopify OAuth consent page
     """
@@ -71,27 +71,20 @@ def shopify_auth(user_id: str = Query(...)):
     #    f"&scope={quote(SHOPIFY_SCOPE)}&redirect_uri={quote(SHOPIFY_REDIRECT_URI)}"
     #)
 
-    params = {
-        "state" : user_id,
-    }
-    full_install_url = f"{SHOPIFY_INSTALL_URL}?{urlencode(params)}"
-    return RedirectResponse(url=full_install_url)
+    request.session["user_id"] = user_id
+    return RedirectResponse(url=SHOPIFY_INSTALL_URL)
 
 @router.get("/install")
 def shopify_install(
     request: Request, 
 ):
     params = dict(request.query_params)
-    state = params.get("state")
-    if not state:
-        raise HTTPException(status_code=400, detail="Missing 'state' parameter")
     shop = params.get("shop")
     hmac = params.get("hmac")
     if not shop or not hmac:
         raise HTTPException(status_code=400, detail="Missing 'shop' or 'hmac' parameter")
     
-    user_id = state
-    redirect_uri = f"{BACKEND_URL}/api/v1/shopify/callback?user_id={user_id}"
+    redirect_uri = f"{BACKEND_URL}/api/v1/shopify/callback"
     auth_url = shopify_auth_helper.build_authorization_url(shop, redirect_uri)
     return RedirectResponse(url=auth_url)
 
@@ -102,7 +95,7 @@ def shopify_callback(request: Request):
     shop = params.get("shop")
     code = params.get("code")
     hmac_received = params.get("hmac")
-    user_id = params.get("user_id") 
+    user_id = request.session.get("user_id")
 
     if not shop or not code or not hmac_received or not user_id:
         raise HTTPException(status_code=400, detail="Missing parameters")
