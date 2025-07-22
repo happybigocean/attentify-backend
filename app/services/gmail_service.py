@@ -8,7 +8,7 @@ from bson import ObjectId
 import logging
 import requests
 
-async def fetch_and_save_gmail(account: dict, db):
+async def fetch_and_save_gmail(account: dict, db, user_id: str):
     creds = Credentials(
         token=account["access_token"],
         refresh_token=account["refresh_token"],
@@ -130,7 +130,7 @@ async def fetch_and_save_gmail(account: dict, db):
             )
 
             # Find existing thread (conversation) in 'messages' collection by thread_id
-            existing_thread = await db["messages"].find_one({"thread_id": thread_id, "channel": "email"})
+            existing_thread = await db["messages"].find_one({"user_id": ObjectId(user_id), "thread_id": thread_id, "channel": "email"})
 
             # Avoid duplicate insert of the same gmail_id in a thread
             if existing_thread:
@@ -149,6 +149,7 @@ async def fetch_and_save_gmail(account: dict, db):
                 )
             else:
                 message_doc = {
+                    "user_id": ObjectId(user_id),
                     "thread_id": thread_id,
                     "participants": list(set([sender, to])),
                     "channel": "email",
@@ -172,8 +173,8 @@ async def fetch_and_save_gmail(account: dict, db):
         logging.exception(f"Error fetching emails for {account['email']}: {str(e)}")
         return f"Failed to fetch emails for {account['email']} due to an error."
     
-async def fetch_all_gmail_accounts(db):
-    cursor = db["gmail_accounts"].find({})
+async def fetch_all_gmail_accounts(db, user_id: str):
+    cursor = db["gmail_accounts"].find({"user_id": ObjectId(user_id)})
     results = []
     async for cred in cursor:
         try:
@@ -186,7 +187,7 @@ async def fetch_all_gmail_accounts(db):
                 "expires_at": cred.get("expires_at")
             }
 
-            result = await fetch_and_save_gmail(token_data, db)  # now only 2 args
+            result = await fetch_and_save_gmail(token_data, db, user_id)  # now only 2 args
             results.append({cred["email"]: result})
         except Exception as e:
             results.append({cred["email"]: f"Error: {str(e)}"})

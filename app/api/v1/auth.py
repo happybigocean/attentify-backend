@@ -3,6 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime
 from app.models.user import UserCreate, Token
 from app.core.security import verify_password, get_password_hash, create_access_token
+from bson import ObjectId
 
 router = APIRouter()
 
@@ -65,12 +66,13 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Reque
         {"$set": {"last_login": datetime.utcnow()}}
     )
 
-    token = create_access_token(data={"sub": user["email"]})
+    user_id = str(user["_id"])  # Convert ObjectId to string
+    token = create_access_token(data={"sub": user["email"], "user_id": user_id})
 
     return {
         "token": token,
         "user": {
-            "id": str(user["_id"]),  # <-- added user_id here as string
+            "id": user_id,  
             "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
             "email": user["email"],
             "role": user.get("role", "readonly"),

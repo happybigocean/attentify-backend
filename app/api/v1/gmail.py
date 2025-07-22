@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Request, HTTPException, Response
+from fastapi import APIRouter, Request, HTTPException, Response, Depends
 from fastapi.responses import RedirectResponse
 from typing import List, Optional
 import httpx
 from urllib.parse import urlencode
 from datetime import datetime, timedelta
-
+from app.core.security import get_current_user
 from bson import ObjectId
 import os
 
@@ -36,19 +36,17 @@ async def create_gmail_account(account: GmailAccountCreate, request: Request):
     return gmail_account_helper(account_dict)
 
 @router.get("/", response_model=List[GmailAccountInDB])
-async def list_gmail_accounts(request: Request, user_id: str):
+async def list_gmail_accounts(
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
     db = request.app.state.db
-
-    # Validate user_id format
-    try:
-        user_obj_id = ObjectId(user_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid user_id format")
-
-    accounts_cursor = db.gmail_accounts.find({"user_id": user_obj_id})
+    
+    accounts_cursor = db.gmail_accounts.find({"user_id": current_user["_id"]})
     accounts = []
     async for account in accounts_cursor:
         accounts.append(gmail_account_helper(account))
+
     return accounts
 
 @router.get("/{account_id}", response_model=GmailAccountInDB)

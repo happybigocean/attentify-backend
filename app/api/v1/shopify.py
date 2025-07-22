@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Request, HTTPException, Header, status, BackgroundTasks
+from fastapi import APIRouter, Request, HTTPException, Header, status, BackgroundTasks, Depends
 from fastapi.responses import RedirectResponse, JSONResponse
 from urllib.parse import urlencode
 import hmac, hashlib, requests, base64
 import os
-from typing import List
+from typing import List, Dict
 from datetime import datetime
 import json
 from bson import ObjectId
@@ -13,7 +13,8 @@ from app.services.shopify_service import (
     upsert_orders,
 )
 
-from app.db.mongodb import get_database  # Assuming you have a MongoDB connection setup in mongodb.py
+from app.db.mongodb import get_database
+from app.core.security import get_current_user
 
 router = APIRouter()
 
@@ -79,11 +80,12 @@ def shopify_callback(request: Request):
     shop = params.get("shop")
     code = params.get("code")
     hmac_received = params.get("hmac")
+    user_id = params.get("user_id") 
 
-    if not shop or not code or not hmac_received:
+    if not shop or not code or not hmac_received or not user_id:
         raise HTTPException(status_code=400, detail="Missing parameters")
 
-    # Verify HMAC
+    # HMAC verification
     sorted_params = "&".join(
         f"{k}={v}" for k, v in sorted(params.items()) if k != "hmac"
     )
@@ -110,15 +112,17 @@ def shopify_callback(request: Request):
 
     access_token = response.json().get("access_token")
 
-    # Register the webhook
+    # Register webhook
     register_shopify_webhook(shop, access_token)
 
     db = request.app.state.db
     db.shopify_cred.update_one(
         {"shop": shop},
-        {"$set": {
-            "access_token": access_token, 
-            "status": "connected"
+        {
+            "$set": {
+                "access_token": access_token,
+                "status": "connected",
+                "user_id": ObjectId(user_id)  # <-- Save user_id properly
             }
         },
         upsert=True
@@ -128,13 +132,17 @@ def shopify_callback(request: Request):
     return RedirectResponse(url=redirect_frontend_url)
 
 @router.get("/install")
-def shopify_install(request: Request):
+def shopify_install(
+    request: Request, 
+    current_user: Dict = Depends(get_current_user)
+):
     params = dict(request.query_params)
     shop = params.get("shop")
     hmac = params.get("hmac")
     if not shop or not hmac:
         raise HTTPException(status_code=400, detail="Missing 'shop' or 'hmac' parameter")
-    redirect_uri = f"{BACKEND_URL}/api/v1/shopify/callback"
+
+    redirect_uri = f"{BACKEND_URL}/api/v1/shopify/callback?user_id={current_user['id']}"
     auth_url = shopify_auth_helper.build_authorization_url(shop, redirect_uri)
     return RedirectResponse(url=auth_url)
 
@@ -174,17 +182,15 @@ def get_shopify_orders(request: Request):
     return response.json()
 
 @router.get("/", response_model=List[dict])
-async def list_shopify_cred(request: Request):
+async def list_shopify_cred(request: Request, current_user: dict = Depends(get_current_user)) :
     db = request.app.state.db
-    creds_cursor = db.shopify_cred.find()
-    creds = []
-    async for cred in creds_cursor:
-
-        if '_id' in cred:
-            cred['_id'] = str(cred['_id'])
-
-        creds.append(cred)
-    return creds
+    cursor = db.shopify_cred.find({"user_id": current_user["_id"]})
+    docs = []
+    async for doc in cursor:
+        doc['_id'] = str(doc['_id'])
+        doc['user_id'] = str(doc['user_id'])  # Convert ObjectId to string
+        docs.append(doc)
+    return docs
 
 # Register Shopify Webhook
 def register_shopify_webhook(shop: str, access_token: str):

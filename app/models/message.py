@@ -26,7 +26,7 @@ class ChatEntry(BaseModel):
 
 class Message(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
-
+    user_id: PyObjectId = Field(...)
     # Conversation/thread grouping key, e.g., Gmail threadId, SMS conversation ID, chat session ID
     thread_id: Optional[str] = None
 

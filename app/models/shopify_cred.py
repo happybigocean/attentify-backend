@@ -1,10 +1,18 @@
-from pydantic import BaseModel, EmailStr
 from typing import Optional
+from bson import ObjectId
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 class ShopifyCredBase(BaseModel):
     shop_url: str
     access_token: str
     status: Optional[str] = "connected"
-    created_at: datetime = datetime.utcnow()
-    updated_at: datetime = datetime.utcnow()
+    user_id: Optional[ObjectId] = Field(default=None, alias="user_id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        allow_population_by_field_name = True
+        json_encoders = {
+            ObjectId: str
+        }

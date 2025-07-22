@@ -17,12 +17,13 @@ from email.mime.text import MIMEText
 from datetime import datetime, timezone
 from email.utils import parseaddr
 from pymongo import DESCENDING
+from app.core.security import get_current_user
 
 router = APIRouter()
 
 @router.post("/fetch-all")
-async def fetch_all(db=Depends(get_database)):
-    result = await fetch_all_gmail_accounts(db)
+async def fetch_all(db=Depends(get_database), current_user: dict = Depends(get_current_user)):
+    result = await fetch_all_gmail_accounts(db, user_id=str(current_user["_id"]))
     return {"result": result}
 
 def extract_name(email_str: str) -> str:
@@ -67,20 +68,18 @@ def doc_to_message_detail(doc: dict) -> Message:
     )
 
 @router.get("/", response_model=List[dict])
-async def get_messages(db=Depends(get_database)):
+async def get_messages(db=Depends(get_database), current_user: dict = Depends(get_current_user)):
     # Sort by 'last_updated' in descending order
-    cursor = db["messages"].find({}).sort("last_updated", DESCENDING)
+    cursor = db["messages"].find({"user_id": current_user["_id"]}).sort("last_updated", DESCENDING)
 
     messages = []
     async for doc in cursor:
-        doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
-
+        doc["_id"] = str(doc["_id"]) 
+        doc["user_id"] = str(doc["user_id"])
         raw_client_id = doc.get("client_id", "")
         cleaned_client_id = extract_name(raw_client_id)
         doc["client_id"] = cleaned_client_id
-
         doc.pop("messages", None)  # Remove the 'messages' field if it exists
-
         messages.append(doc)
     return messages
 
