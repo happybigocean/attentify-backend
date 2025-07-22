@@ -34,14 +34,15 @@ async def register(user: UserCreate, request: Request):
         "last_login": now,
     }
 
-    result = await db.users.insert_one(user_doc)  # Capture insert result
-
+    result = await db.users.insert_one(user_doc)
     inserted_user_id = str(result.inserted_id)
-    token = create_access_token(data={"sub": user["email"], "user_id": inserted_user_id})
+
+    token = create_access_token(data={"sub": user.email, "user_id": inserted_user_id})
+    
     return {
         "token": token,
         "user": {
-            "id": inserted_user_id,  
+            "id": inserted_user_id,
             "name": f"{user.first_name} {user.last_name}",
             "email": user.email,
             "role": role,
