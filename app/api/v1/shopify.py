@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException, Header, status, BackgroundTasks, Depends
+from fastapi import APIRouter, Request, HTTPException, Header, status, BackgroundTasks, Depends, Query
 from fastapi.responses import RedirectResponse, JSONResponse
 from urllib.parse import urlencode
 import hmac, hashlib, requests, base64
@@ -57,7 +57,7 @@ shopify_auth_helper = ShopifyAuthHelper(SHOPIFY_API_KEY, SHOPIFY_API_SECRET)
 
 #/api/v1/shopify/auth
 @router.get("/auth")
-def shopify_auth(request: Request, current_user: Dict = Depends(get_current_user)):
+def shopify_auth(user_id: str = Query(...)):
     """
     Redirect user to Shopify OAuth consent page
     """
@@ -71,7 +71,6 @@ def shopify_auth(request: Request, current_user: Dict = Depends(get_current_user
     #    f"&scope={quote(SHOPIFY_SCOPE)}&redirect_uri={quote(SHOPIFY_REDIRECT_URI)}"
     #)
 
-    user_id = str(current_user["_id"])
     params = {
         "state" : user_id,
     }
