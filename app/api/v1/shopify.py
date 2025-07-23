@@ -193,6 +193,14 @@ async def list_shopify_cred(request: Request, current_user: dict = Depends(get_c
         docs.append(doc)
     return docs
 
+@router.delete("/{shopify_id}")
+async def delete_shopify_cred(shopify_id: str, request: Request):
+    db = request.app.state.db
+    result = await db.shopify_cred.delete_one({"_id": ObjectId(shopify_id)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Shopify credential not found")
+    return {"detail": "Deleted successfully"}
+
 # Register Shopify Webhook
 def register_shopify_webhook(shop: str, access_token: str):
     webhook_url = f"https://{shop}/admin/api/2024-10/webhooks.json"
