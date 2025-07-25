@@ -93,6 +93,7 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
         raise HTTPException(status_code=404, detail="Message not found")
 
     doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
+    doc["user_id"] = str(doc["user_id"])
     return doc
 
 @router.post("/analyze_as_list", response_model=list)
