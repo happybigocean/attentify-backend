@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime
-from app.models.user import UserCreate, Token
+from app.models.user import UserCreate
 from app.core.security import verify_password, get_password_hash, create_access_token
 from bson import ObjectId
 

@@ -1,39 +1,84 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from datetime import datetime
+from bson import ObjectId
+from app.utils.bson import PyObjectId
 
+# -------------------
+# User
+# -------------------
 class UserBase(BaseModel):
     email: EmailStr
     first_name: str
     last_name: str
-    role: Literal["admin", "store_owner", "agent", "readonly"] = "store_owner"
-    status: Literal["active", "invited", "suspended"] = "active"
-    team_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
 
-class User(UserBase):
-    id: str = Field(..., alias="_id")
-    _id: str
-
-    class Config:
-        allow_population_by_field_name = True
-        orm_mode = True
-        
-# For user creation (includes password)
 class UserCreate(UserBase):
     password: str
 
-# Internal DB model (stores hashed password)
 class UserInDB(UserBase):
+    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     hashed_password: str
 
-# Public-facing model (without sensitive data)
-class User(UserBase):
+    class Config:
+        json_encoders = {ObjectId: str}
+        allow_population_by_field_name = True
+        arbitrary_types_allowed = True
+
+class UserPublic(BaseModel):
+    id: PyObjectId = Field(alias="_id")
+    email: str
+    first_name: str
+    last_name: str
+
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str}
+
+# -------------------
+# Company
+# -------------------
+class CompanyBase(BaseModel):
+    name: str
+    site_url: str
+
+class CompanyCreate(CompanyBase):
     pass
 
-# Token model for auth
-class Token(BaseModel):
-    access_token: str
-    token_type: str
+class CompanyInDB(CompanyBase):
+    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    created_by: PyObjectId
+    created_at: datetime
+
+    class Config:
+        json_encoders = {ObjectId: str}
+        allow_population_by_field_name = True
+        arbitrary_types_allowed = True
+
+# -------------------
+# Membership
+# -------------------
+class MembershipBase(BaseModel):
+    role: Literal["company_owner", "store_owner", "agent", "readonly"]
+    status: Literal["active", "invited", "suspended"] = "active"
+
+class MembershipCreate(MembershipBase):
+    user_id: PyObjectId
+    company_id: PyObjectId
+
+
+class MembershipInDB(MembershipCreate):
+    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    joined_at: datetime
+
+    class Config:
+        json_encoders = {ObjectId: str}
+        allow_population_by_field_name = True
+        arbitrary_types_allowed = True
+
+class MembershipPublic(MembershipInDB):
+    user: Optional[UserPublic]
+    company: Optional[CompanyInDB]

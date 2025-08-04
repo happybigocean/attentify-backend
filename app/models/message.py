@@ -2,17 +2,7 @@ from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Dict, Any
 from datetime import datetime
 from bson import ObjectId
-
-class PyObjectId(ObjectId):
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-
-    @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
+from app.utils.bson import PyObjectId
 
 class ChatEntry(BaseModel):
     sender: str  # Now stores the actual sender (email, phone number, etc.)

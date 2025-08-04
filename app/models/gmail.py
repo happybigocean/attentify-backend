@@ -3,23 +3,7 @@ from typing import Optional, Any
 from bson import ObjectId
 from datetime import datetime
 from pydantic_core import core_schema
-
-class PyObjectId(ObjectId):
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls, _source_type: Any, _handler: GetCoreSchemaHandler
-    ) -> core_schema.CoreSchema:
-        return core_schema.no_info_before_validator_function(
-            cls.validate, core_schema.str_schema()
-        )
-
-    @classmethod
-    def validate(cls, v: Any) -> ObjectId:
-        if isinstance(v, ObjectId):
-            return v
-        if isinstance(v, str) and ObjectId.is_valid(v):
-            return ObjectId(v)
-        raise ValueError("Invalid ObjectId")
+from app.utils.bson import PyObjectId
 
 class GmailAccountBase(BaseModel):
     user_id: PyObjectId = Field(...)
