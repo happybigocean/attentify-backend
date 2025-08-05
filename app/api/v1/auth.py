@@ -3,7 +3,6 @@ from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime
 from app.models.user import UserCreate
 from app.core.security import verify_password, get_password_hash, create_access_token
-from bson import ObjectId
 from app.db.mongodb import get_database
 
 router = APIRouter()
@@ -60,8 +59,32 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
         {"$set": {"last_login": datetime.utcnow()}}
     )
 
+    memberships_cursor = db.memberships.find({
+        "user_id": user["_id"],
+        "status": "active"
+    }).sort("last_used_at", -1)
+
+    memberships = await memberships_cursor.to_list(length=None)
+
+    if not memberships:
+        raise HTTPException(status_code=403, detail="No active company membership found")
+    
+    selected_membership = memberships[0]
+    company_id = selected_membership["company_id"]
+    role = selected_membership.get("role", "readonly")
+
+    await db.memberships.update_one(
+        {"_id": selected_membership["_id"]},
+        {"$set": {"last_used_at": datetime.utcnow()}}
+    )
+
     user_id = str(user["_id"])  # Convert ObjectId to string
-    token = create_access_token(data={"sub": user["email"], "user_id": user_id})
+    token = create_access_token(data={
+        "sub": user["email"],
+        "user_id": user_id,
+        "company_id": str(company_id),
+        "role": role
+    })
 
     return {
         "token": token,
@@ -69,7 +92,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
             "id": user_id,  
             "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
             "email": user["email"],
-            "role": user.get("role", "readonly"),
-            "status": user.get("status", "active")
+            "company_id": str(company_id),
+            "role": role
         }
     }

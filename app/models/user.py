@@ -73,6 +73,7 @@ class MembershipCreate(MembershipBase):
 class MembershipInDB(MembershipCreate):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     joined_at: datetime
+    last_used_at: datetime
 
     class Config:
         json_encoders = {ObjectId: str}
