@@ -4,6 +4,7 @@ from datetime import datetime
 from app.models.user import UserCreate
 from app.core.security import verify_password, get_password_hash, create_access_token
 from bson import ObjectId
+from app.db.mongodb import get_database
 
 router = APIRouter()
 
@@ -11,13 +12,11 @@ VALID_ROLES = {"admin", "store_owner", "agent", "readonly"}
 
 # /api/v1/auth/register
 @router.post("/register")
-async def register(user: UserCreate, request: Request):
-    db = request.app.state.db
+async def register(user: UserCreate, db=Depends(get_database)):
     existing = await db.users.find_one({"email": user.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    role = user.role if user.role in VALID_ROLES else "readonly"
     hashed_password = get_password_hash(user.password)
     now = datetime.utcnow()
 
@@ -25,35 +24,29 @@ async def register(user: UserCreate, request: Request):
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "role": role,
-        "status": "active",
         "hashed_password": hashed_password,
-        "team_id": None,
         "created_at": now,
         "updated_at": now,
         "last_login": now,
     }
 
     result = await db.users.insert_one(user_doc)
-    inserted_user_id = str(result.inserted_id)
+    user_id  = str(result.inserted_id)
 
-    token = create_access_token(data={"sub": user.email, "user_id": inserted_user_id})
+    token = create_access_token(data={"sub": user.email, "user_id": user_id })
     
     return {
         "token": token,
         "user": {
-            "id": inserted_user_id,
+            "id": user_id ,
             "name": f"{user.first_name} {user.last_name}",
             "email": user.email,
-            "role": role,
-            "status": "active"
         }
     }
 
 # /api/v1/auth/login
 @router.post("/login")
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Request = None):
-    db = request.app.state.db
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get_database)):
     user = await db.users.find_one({"email": form_data.username})
     
     if not user or not verify_password(form_data.password, user["hashed_password"]):
