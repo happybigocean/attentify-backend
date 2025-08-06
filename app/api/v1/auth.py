@@ -59,6 +59,24 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
         {"$set": {"last_login": datetime.utcnow()}}
     )
 
+    if user.get("role") == "admin":
+        user_id = str(user["_id"])  # Convert ObjectId to string
+        token = create_access_token(data={
+            "sub": user["email"],
+            "user_id": user_id,
+            "role": "admin"
+        })
+
+        return {
+            "token": token,
+            "user": {
+                "id": user_id,  
+                "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+                "email": user["email"],
+                "role": "admin"
+            }
+        }
+        
     memberships_cursor = db.memberships.find({
         "user_id": user["_id"],
         "status": "active"
