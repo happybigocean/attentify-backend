@@ -59,8 +59,10 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
         {"$set": {"last_login": datetime.utcnow()}}
     )
 
+    user_id = str(user["_id"])  # Convert ObjectId to string
+
     if user.get("role") == "admin":
-        user_id = str(user["_id"])  # Convert ObjectId to string
+        user_id = user_id
         token = create_access_token(data={
             "sub": user["email"],
             "user_id": user_id,
@@ -96,7 +98,21 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
         {"$set": {"last_used_at": datetime.utcnow()}}
     )
 
-    user_id = str(user["_id"])  # Convert ObjectId to string
+    # === Fetch Company Info ===
+    company_ids = [m["company_id"] for m in memberships]
+    companies_cursor = db.companies.find({"_id": {"$in": company_ids}})
+    companies_map = {str(c["_id"]): c async for c in companies_cursor}
+
+    company_list = []
+    for m in memberships:
+        cid = str(m["company_id"])
+        company = companies_map.get(cid)
+        if company:
+            company_list.append({
+                "id": cid,
+                "name": company.get("name", "")
+            })
+    
     token = create_access_token(data={
         "sub": user["email"],
         "user_id": user_id,
@@ -111,6 +127,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
             "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
             "email": user["email"],
             "company_id": str(company_id),
-            "role": role
+            "role": role,
+            "companies": company_list
         }
     }

@@ -58,6 +58,15 @@ class CompanyInDB(CompanyBase):
         allow_population_by_field_name = True
         arbitrary_types_allowed = True
 
+class SimpleCompanyOut(BaseModel):
+    id: str
+    name: str
+
+    class Config:
+        json_encoders = {ObjectId: str}
+        allow_population_by_field_name = True
+        arbitrary_types_allowed = True
+
 # -------------------
 # Membership
 # -------------------

@@ -1,11 +1,43 @@
 from fastapi import APIRouter, Depends
 from datetime import datetime
-from app.models.user import CompanyCreate
+from app.models.user import CompanyCreate, SimpleCompanyOut
 from bson import ObjectId
 from app.db.mongodb import get_database
 from app.core.security import get_current_user
+from typing import List
 
 router = APIRouter()
+
+def transform_company(company):
+    return {
+        "id": str(company["_id"]),
+        **{k: v for k, v in company.items() if k != "_id"}
+    }
+
+#GET /api/v1/company/
+@router.get("/", response_model=List[SimpleCompanyOut])
+async def list_companies(current_user: dict = Depends(get_current_user), db = Depends(get_database)):
+    user_id = current_user["_id"]
+
+    memberships_cursor = db["memberships"].find({
+        "user_id": user_id,
+        "status": "active"
+    })
+
+    company_ids = [m["company_id"] for m in await memberships_cursor.to_list(length=100)]
+
+    if not company_ids:
+        return []
+
+    companies_cursor = db["companies"].find({
+        "_id": {"$in": company_ids}
+    })
+
+    companies = await companies_cursor.to_list(length=100)
+
+    # Convert _id to id
+    return [transform_company(company) for company in companies]
+
 
 # /api/v1/compnany/create
 @router.post("/create")
