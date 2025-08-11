@@ -44,6 +44,7 @@ class UserPublic(BaseModel):
 class CompanyBase(BaseModel):
     name: str
     site_url: str
+    email: str
 
 class CompanyCreate(CompanyBase):
     pass
