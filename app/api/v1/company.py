@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime
-from app.models.user import CompanyCreate, SimpleCompanyOut, CompanyInDB, UpdateCompanyRequest
+from app.models.company import CompanyCreate, SimpleCompanyOut, CompanyInDB, UpdateCompanyRequest
+from app.models.user import UserPublic
 from bson import ObjectId
 from app.db.mongodb import get_database
 from app.core.security import get_current_user
-from typing import List, Optional
+from typing import List
 
 router = APIRouter()
 
@@ -137,3 +138,31 @@ async def update_company(
         "email": updated_company.get("email")
     }
 
+#GET /api/v1/company/{company_id}/members
+@router.get("/{company_id}/members", response_model=List[dict])
+async def list_company_members(
+    company_id: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    if not ObjectId.is_valid(company_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company ID")
+
+    members_cursor = db["memberships"].find({
+        "company_id": ObjectId(company_id),
+        "status": "active"
+    })
+
+    memberships = []
+    async for membership in members_cursor:
+        user = await db["users"].find_one({"_id": membership["user_id"]})
+        if user:
+            memberships.append({
+                "membership_id": str(membership["_id"]),
+                "email": user["email"],
+                "role": membership["role"]
+            })
+
+    if not memberships:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active members found for this company")
+    return memberships

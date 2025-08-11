@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 from pymongo.collection import Collection
-from app.models.user import UserCreate, UserInDB, UserPublic
+from app.models.user import UserCreate, UserPublic
 from app.db.mongodb import get_database
 from datetime import datetime
 from bson import ObjectId
