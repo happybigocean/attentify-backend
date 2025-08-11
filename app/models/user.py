@@ -44,7 +44,7 @@ class UserPublic(BaseModel):
 class CompanyBase(BaseModel):
     name: str
     site_url: str
-    email: str
+    email: EmailStr
 
 class CompanyCreate(CompanyBase):
     pass
@@ -67,6 +67,12 @@ class SimpleCompanyOut(BaseModel):
         json_encoders = {ObjectId: str}
         allow_population_by_field_name = True
         arbitrary_types_allowed = True
+
+class UpdateCompanyRequest(BaseModel):
+    company_id: str = Field(..., description="MongoDB ObjectId of the company")
+    name: Optional[str] = None
+    site_url: Optional[str] = None
+    email: Optional[EmailStr] = None
 
 # -------------------
 # Membership

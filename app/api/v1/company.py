@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime
-from app.models.user import CompanyCreate, SimpleCompanyOut, CompanyInDB
+from app.models.user import CompanyCreate, SimpleCompanyOut, CompanyInDB, UpdateCompanyRequest
 from bson import ObjectId
 from app.db.mongodb import get_database
 from app.core.security import get_current_user
-from typing import List
+from typing import List, Optional
 
 router = APIRouter()
 
@@ -46,6 +46,7 @@ async def create_company(company: CompanyCreate, current_user: dict = Depends(ge
     company_doc = {
         "name": company.name,
         "site_url": company.site_url,
+        "email": company.email,
         "created_by": ObjectId(current_user["_id"]),
         "created_at": datetime.utcnow(),
     }
@@ -73,7 +74,7 @@ async def create_company(company: CompanyCreate, current_user: dict = Depends(ge
         }
     }
 
-# /api/v1/company/{company_id}
+#GET /api/v1/company/{company_id}
 @router.get("/{company_id}", response_model=CompanyInDB)
 async def get_company(
     company_id: str,
@@ -98,5 +99,41 @@ async def get_company(
 
     return CompanyInDB.parse_obj(company)
     
+#POST /api/v1/company/update-company
+@router.post("/update-company")
+async def update_company(
+    payload: UpdateCompanyRequest,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    if not ObjectId.is_valid(payload.company_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company ID")
 
+    # Build dynamic update fields
+    update_data = {}
+    if payload.name is not None:
+        update_data["name"] = payload.name
+    if payload.site_url is not None:
+        update_data["site_url"] = payload.site_url
+    if payload.email is not None:
+        update_data["email"] = payload.email
+
+    if not update_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields provided for update")
+
+    updated_company = await db["companies"].find_one_and_update(
+        {"_id": ObjectId(payload.company_id)},
+        {"$set": update_data},
+        return_document=True  # Returns updated document
+    )
+
+    if not updated_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    return {
+        "id": str(updated_company["_id"]),
+        "name": updated_company.get("name"),
+        "site_url": updated_company.get("site_url"),
+        "email": updated_company.get("email")
+    }
 
