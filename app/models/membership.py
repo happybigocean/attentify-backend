@@ -28,3 +28,8 @@ class MembershipInDB(MembershipCreate):
 class MembershipPublic(MembershipInDB):
     user: Optional[UserPublic]
     company: Optional[CompanyInDB]
+
+class UpdateMembershipRequest(BaseModel):
+    membership_id: str = Field(..., description="MongoDB ObjectId of the membership")
+    role: Optional[Literal["company_owner", "store_owner", "agent", "readonly"]] = None
+    status: Optional[Literal["active", "invited", "suspended"]] = None
