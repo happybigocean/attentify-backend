@@ -1,17 +1,25 @@
-def gmail_account_helper(account: dict) -> dict:
-    return {
-        "id": str(account["_id"]),
-        "user_id": str(account["user_id"]),
-        "email": account["email"],
-        "access_token": account["access_token"],
-        "refresh_token": account["refresh_token"],
-        "token_type": account.get("token_type", "Bearer"),
-        "expires_at": account["expires_at"],
-        "client_id": account["client_id"],
-        "client_secret": account["client_secret"],
-        "status": account.get("status", "connected"),
-        "scope": account.get("scope"),
-        "token_issued_at": account.get("token_issued_at"),
-        "is_primary": account.get("is_primary", False),
-        "provider": account.get("provider", "google"),
-    }
+# email_utils.py
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
+from app.core.config import settings
+
+conf = ConnectionConfig(
+    MAIL_USERNAME=settings.MAIL_USERNAME,
+    MAIL_PASSWORD=settings.MAIL_PASSWORD,
+    MAIL_FROM=settings.MAIL_FROM,
+    MAIL_PORT=settings.MAIL_PORT,
+    MAIL_SERVER=settings.MAIL_SERVER,
+    MAIL_FROM_NAME=settings.MAIL_FROM_NAME,
+    MAIL_STARTTLS=True,
+    MAIL_SSL_TLS=False,
+    USE_CREDENTIALS=True
+)
+
+async def send_invitation_email(to_email: str, invite_link: str):
+    message = MessageSchema(
+        subject="You're invited!",
+        recipients=[to_email],
+        body=f"Hello,\n\nYou have been invited. Click here to join: {invite_link}\n\nThis link will expire in 48 hours.",
+        subtype="plain"
+    )
+    fm = FastMail(conf)
+    await fm.send_message(message)

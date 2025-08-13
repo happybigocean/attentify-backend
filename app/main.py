@@ -58,6 +58,8 @@ from app.api.v1 import company
 app.include_router(company.router, prefix="/api/v1/company", tags=["Company"])
 from app.api.v1 import membership
 app.include_router(membership.router, prefix="/api/v1/membership", tags=["Membership"])
+from app.api.v1 import invitation
+app.include_router(invitation.router, prefix="/api/v1/invitations", tags=["Invitations"])
 #app.include_router(inbox.router, prefix="/api/v1/inbox", tags=["Inbox"])
 #app.include_router(ai.router, prefix="/api/v1/ai", tags=["AI"])
 #app.include_router(templates.router, prefix="/api/v1/templates", tags=["Templates"])
