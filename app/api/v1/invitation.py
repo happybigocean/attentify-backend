@@ -1,11 +1,13 @@
 # routers/invitations.py
 from fastapi import APIRouter, Depends, HTTPException, status
-from datetime import datetime
+from datetime import datetime, timedelta
 from bson import ObjectId
 from app.db.mongodb import get_database
-from app.models.invitation import InvitationBase
+from app.models.invitation import InvitationBase, InvitationDetails
 from app.utils.token_utils import create_invitation_token, verify_invitation_token
 from app.utils.email_utils import send_invitation_email
+from jose import jwt, JWTError
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -15,7 +17,7 @@ async def send_invitation(invite: InvitationBase, db=Depends(get_database)):
     if not ObjectId.is_valid(str(invite.company_id)):
         raise HTTPException(status_code=400, detail="Invalid company ID")
     
-    token = create_invitation_token(invite.email, str(invite.company_id))
+    token = create_invitation_token(invite.email, str(invite.company_id), invite.role)
     invite_link = f"http://localhost:5173/accept-invite?token={token}"
 
     await db["invitations"].insert_one({
@@ -68,3 +70,13 @@ async def accept_invitation(token: str, db=Depends(get_database)):
 
     return {"message": "Invitation accepted successfully"}
 
+# GET endpoint
+@router.get("/{token}", response_model=InvitationDetails)
+def get_invitation(token: str):
+    payload = verify_invitation_token(token)
+
+    return InvitationDetails(
+        email=payload["email"],
+        role=payload["role"],
+        expires_at=datetime.utcnow() + timedelta(seconds=172800)  # optional
+    )

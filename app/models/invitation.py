@@ -10,6 +10,11 @@ class InvitationBase(BaseModel):
     company_id: PyObjectId
     role: Literal["company_owner", "store_owner", "agent", "readonly"]
 
+class InvitationDetails(BaseModel):
+    email: str
+    role: str
+    expires_at: datetime
+
 class InvitationInDB(InvitationBase):
     id: PyObjectId
     token: str
