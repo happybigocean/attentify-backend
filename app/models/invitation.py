@@ -1,5 +1,5 @@
 # models/invitation.py
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import Literal
 from bson import ObjectId
@@ -12,8 +12,12 @@ class InvitationBase(BaseModel):
 
 class InvitationDetails(BaseModel):
     email: str
+    company_id: str
     role: str
     expires_at: datetime
+
+class AcceptInvitationRequest(BaseModel):
+    token: str = Field(..., description="Invitation token received via email")
 
 class InvitationInDB(InvitationBase):
     id: PyObjectId

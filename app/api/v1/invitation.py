@@ -3,11 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime, timedelta
 from bson import ObjectId
 from app.db.mongodb import get_database
-from app.models.invitation import InvitationBase, InvitationDetails
+from app.models.invitation import InvitationBase, InvitationDetails, AcceptInvitationRequest
 from app.utils.token_utils import create_invitation_token, verify_invitation_token
 from app.utils.email_utils import send_invitation_email
 from jose import jwt, JWTError
 from app.core.config import settings
+from fastapi.responses import RedirectResponse
 
 router = APIRouter()
 
@@ -33,26 +34,29 @@ async def send_invitation(invite: InvitationBase, db=Depends(get_database)):
     return {"message": "Invitation sent successfully."}
 
 @router.post("/accept")
-async def accept_invitation(token: str, db=Depends(get_database)):
+async def accept_invitation(
+    payload: AcceptInvitationRequest,
+    db=Depends(get_database)
+):
     try:
-        data = verify_invitation_token(token)
+        data = verify_invitation_token(payload.token)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid or expired token")
+        raise HTTPException(status_code=400, detail="Invalid or expired invitation token")
 
     email = data["email"]
     company_id = data["company_id"]
 
-    invitation = await db["invitations"].find_one({"token": token, "status": "pending"})
+    invitation = await db["invitations"].find_one({"token": payload.token, "status": "pending"})
     if not invitation:
         raise HTTPException(status_code=400, detail="Invitation already used or invalid")
 
     # Check if user exists
     user = await db["users"].find_one({"email": email})
     if not user:
-        # Redirect user to signup in frontend or create placeholder
-        raise HTTPException(status_code=404, detail="User not found. Please sign up first.")
+        # Frontend can redirect to signup page if user doesn't exist
+        return {"redirect_url": f"/signup?token={payload.token}"}
 
-    # Add to memberships
+    # Add user to memberships
     await db["memberships"].insert_one({
         "user_id": user["_id"],
         "company_id": ObjectId(company_id),
@@ -68,7 +72,7 @@ async def accept_invitation(token: str, db=Depends(get_database)):
         {"$set": {"status": "accepted"}}
     )
 
-    return {"message": "Invitation accepted successfully"}
+    return {"redirect_url": f"/login"}
 
 # GET endpoint
 @router.get("/{token}", response_model=InvitationDetails)
@@ -77,6 +81,7 @@ def get_invitation(token: str):
 
     return InvitationDetails(
         email=payload["email"],
+        company_id=payload["company_id"],
         role=payload["role"],
         expires_at=datetime.utcnow() + timedelta(seconds=172800)  # optional
     )

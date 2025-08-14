@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     MAIL_SERVER: str
     MAIL_FROM_NAME: str = "Attentify"
     SECRET_KEY: str 
+    FRONTEND_URL: str = "http://localhost:5173"
 
     class Config:
         env_file = ".env"
