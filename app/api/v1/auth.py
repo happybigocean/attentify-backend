@@ -4,6 +4,8 @@ from datetime import datetime
 from app.models.user import UserCreate
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.db.mongodb import get_database
+from app.utils.token_utils import verify_invitation_token
+from bson import ObjectId
 
 router = APIRouter()
 
@@ -30,17 +32,70 @@ async def register(user: UserCreate, db=Depends(get_database)):
     }
 
     result = await db.users.insert_one(user_doc)
-    user_id  = str(result.inserted_id)
+    user_id = str(result.inserted_id)
 
-    token = create_access_token(data={"sub": user.email, "user_id": user_id })
-    
+    # If invitation token is provided, handle it
+    if user.invitation_token:
+        try:
+            data = verify_invitation_token(user.invitation_token)
+            company_id = data["company_id"]
+            role = data["role"]
+
+            if role not in VALID_ROLES:
+                raise HTTPException(status_code=400, detail="Invalid role in invitation token")
+
+            # Add user to memberships
+            await db.memberships.insert_one({
+                "user_id": result.inserted_id,
+                "company_id": ObjectId(company_id),
+                "role": role,
+                "status": "active",
+                "joined_at": now,
+                "last_used_at": now
+            })
+
+            token = create_access_token(data={
+                "sub": user.email,
+                "user_id": user_id,
+                "company_id": str(company_id),
+                "role": role
+            })
+
+            company = await db.companies.find_one({"_id": ObjectId(company_id)})
+
+            company_list = []
+            if company:
+                company_list.append({
+                    "id": str(company["_id"]),
+                    "name": company.get("name", "")
+                })
+
+            return {
+                "token": token,
+                "user": {
+                    "id": user_id,
+                    "name": f"{user.first_name} {user.last_name}".strip(),
+                    "email": user.email,
+                    "company_id": str(company_id),
+                    "role": role,
+                    "companies": company_list
+                },
+                "redirect_url": "/dashboard"
+            }
+
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    token = create_access_token(data={"sub": user.email, "user_id": user_id})
+
     return {
         "token": token,
         "user": {
-            "id": user_id ,
-            "name": f"{user.first_name} {user.last_name}",
+            "id": user_id,
+            "name": f"{user.first_name} {user.last_name}".strip(),
             "email": user.email,
-        }
+        },
+        "redirect_url": "/register-company"
     }
 
 # /api/v1/auth/login

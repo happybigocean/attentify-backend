@@ -14,6 +14,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    invitation_token: Optional[str] = None
 
 class UserInDB(UserBase):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
