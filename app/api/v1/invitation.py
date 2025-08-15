@@ -19,7 +19,7 @@ async def send_invitation(invite: InvitationBase, db=Depends(get_database)):
         raise HTTPException(status_code=400, detail="Invalid company ID")
     
     token = create_invitation_token(invite.email, str(invite.company_id), invite.role)
-    invite_link = f"http://localhost:5173/accept-invite?token={token}"
+    invite_link = f"{settings.FRONTEND_URL}/accept-invite?token={token}"
 
     await db["invitations"].insert_one({
         "email": invite.email,
