@@ -9,6 +9,7 @@ from app.utils.email_utils import send_invitation_email
 from jose import jwt, JWTError
 from app.core.config import settings
 from fastapi.responses import RedirectResponse
+from app.core.security import get_current_user, create_access_token
 
 router = APIRouter()
 
@@ -33,8 +34,8 @@ async def send_invitation(invite: InvitationBase, db=Depends(get_database)):
     await send_invitation_email(invite.email, invite_link)
     return {"message": "Invitation sent successfully."}
 
-@router.post("/accept")
-async def accept_invitation(
+@router.post("/accept-invitation-token")
+async def accept_invitation_token(
     payload: AcceptInvitationRequest,
     db=Depends(get_database)
 ):
@@ -75,7 +76,7 @@ async def accept_invitation(
     return {"redirect_url": f"/login"}
 
 # GET endpoint
-@router.get("/{token}", response_model=InvitationDetails)
+@router.get("/invitation-status/{token}", response_model=InvitationDetails)
 def get_invitation(token: str):
     payload = verify_invitation_token(token)
 
@@ -85,3 +86,99 @@ def get_invitation(token: str):
         role=payload["role"],
         expires_at=datetime.utcnow() + timedelta(seconds=172800)  # optional
     )
+
+@router.get("/invitation-status")
+async def get_invitation_status(db=Depends(get_database), current_user=Depends(get_current_user)):
+    """Returns company & role info for pending invitation."""
+    invitation = await db.invitations.find_one({
+        "email": current_user["email"],
+        "status": "pending"
+    })
+
+    if not invitation:
+        raise HTTPException(status_code=404, detail="No pending invitation found")
+
+    company = await db.companies.find_one({"_id": invitation["company_id"]})
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    return {
+        "company_id": str(company["_id"]),
+        "company_name": company.get("name", ""),
+        "role": invitation["role"]
+    }
+
+@router.post("/invitation-accept")
+async def accept_invitation(db=Depends(get_database), current_user=Depends(get_current_user)):
+    """Accepts the pending invitation."""
+    now = datetime.utcnow()
+    invitation = await db.invitations.find_one({
+        "email": current_user["email"],
+        "status": "pending"
+    })
+
+    if not invitation:
+        raise HTTPException(status_code=404, detail="No pending invitation found")
+
+    # Add to memberships
+    await db.memberships.insert_one({
+        "user_id": ObjectId(current_user["_id"]),
+        "company_id": invitation["company_id"],
+        "role": invitation["role"],
+        "status": "active",
+        "joined_at": now,
+        "last_used_at": now
+    })
+
+    # Mark invitation as accepted
+    await db.invitations.update_one(
+        {"_id": invitation["_id"]},
+        {"$set": {"status": "accepted"}}
+    )
+
+    token = create_access_token(data={
+        "sub": current_user["email"],
+        "user_id": str(current_user["_id"]),
+        "company_id": str(invitation["company_id"]),
+        "role": invitation["role"]
+    })
+
+    company = await db.companies.find_one({"_id": invitation["company_id"]})
+    company_list = []
+    if company:
+        company_list.append({
+            "id": str(company["_id"]),
+            "name": company.get("name", "")
+        })
+
+    return {
+        "token": token,
+        "user": {
+            "id": str(current_user["_id"]),  # ✅ FIXED: convert ObjectId to str
+            "name": f"{current_user['first_name']} {current_user['last_name']}".strip(),
+            "email": current_user["email"],
+            "company_id": str(invitation["company_id"]),
+            "role": invitation["role"],
+            "companies": company_list
+        },
+        "redirect_url": "/dashboard"
+    }
+
+
+@router.post("/invitation-cancel")
+async def cancel_invitation(db=Depends(get_database), current_user=Depends(get_current_user)):
+    """Cancels the pending invitation."""
+    invitation = await db.invitations.find_one({
+        "email": current_user["email"],
+        "status": "pending"
+    })
+
+    if not invitation:
+        raise HTTPException(status_code=404, detail="No pending invitation found")
+
+    await db.invitations.update_one(
+        {"_id": invitation["_id"]},
+        {"$set": {"status": "cancelled"}}
+    )
+
+    return {"message": "Invitation cancelled"}

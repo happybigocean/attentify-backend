@@ -86,7 +86,17 @@ async def register(user: UserCreate, db=Depends(get_database)):
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-    token = create_access_token(data={"sub": user.email, "user_id": user_id})
+    # No token, check pending invitation
+    invitation_result = await db.invitations.find_one({
+        "email": user.email,
+        "status": "pending"
+    })
+
+    redirect_url = "/register-company"
+    if invitation_result:
+        redirect_url = "/ask-accept-invitation"
+
+    token = create_access_token({"sub": user.email, "user_id": user_id})
 
     return {
         "token": token,
@@ -95,7 +105,7 @@ async def register(user: UserCreate, db=Depends(get_database)):
             "name": f"{user.first_name} {user.last_name}".strip(),
             "email": user.email,
         },
-        "redirect_url": "/register-company"
+        "redirect_url": redirect_url
     }
 
 # /api/v1/auth/login

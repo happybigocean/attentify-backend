@@ -23,7 +23,7 @@ class InvitationInDB(InvitationBase):
     id: PyObjectId
     token: str
     invited_at: datetime
-    status: Literal["pending", "accepted", "expired"] = "pending"
+    status: Literal["pending", "accepted", "expired", "cancelled"] = "pending"
 
     class Config:
         json_encoders = {ObjectId: str}
