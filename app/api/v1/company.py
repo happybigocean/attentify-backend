@@ -6,6 +6,7 @@ from bson import ObjectId
 from app.db.mongodb import get_database
 from app.core.security import get_current_user
 from typing import List
+from app.core.security import create_access_token
 
 router = APIRouter()
 
@@ -41,6 +42,8 @@ async def list_companies(current_user: dict = Depends(get_current_user), db = De
 
 
 # /api/v1/compnany/create
+from bson import ObjectId
+
 @router.post("/create")
 async def create_company(company: CompanyCreate, current_user: dict = Depends(get_current_user), db=Depends(get_database)):
     now = datetime.utcnow()
@@ -49,7 +52,7 @@ async def create_company(company: CompanyCreate, current_user: dict = Depends(ge
         "site_url": company.site_url,
         "email": company.email,
         "created_by": ObjectId(current_user["_id"]),
-        "created_at": datetime.utcnow(),
+        "created_at": now,
     }
     
     result = await db.companies.insert_one(company_doc)
@@ -57,7 +60,7 @@ async def create_company(company: CompanyCreate, current_user: dict = Depends(ge
 
     # Create membership for the current user
     membership_doc = {
-        "user_id": current_user["_id"],
+        "user_id": ObjectId(current_user["_id"]),
         "company_id": company_id,
         "role": "company_owner",
         "status": "active",
@@ -67,12 +70,30 @@ async def create_company(company: CompanyCreate, current_user: dict = Depends(ge
 
     await db.memberships.insert_one(membership_doc)
 
-    return {
+    # Generate access token
+    token = create_access_token(data={
+        "sub": current_user["email"],
+        "user_id": str(current_user["_id"]), 
         "company_id": str(company_id),
-        "membership": {
+        "role": "company_owner"
+    })
+
+    company_list = [{
+        "id": str(company_id),
+        "name": company.name
+    }]
+
+    return {
+        "token": token,
+        "user": {
+            "id": str(current_user["_id"]),
+            "name": f"{current_user.get('first_name', '')} {current_user.get('last_name', '')}".strip(),
+            "email": current_user.get("email", ""),
+            "company_id": str(company_id),
             "role": "company_owner",
-            "status": "active"
-        }
+            "companies": company_list
+        },
+        "redirect_url": "/dashboard"
     }
 
 #GET /api/v1/company/{company_id}
