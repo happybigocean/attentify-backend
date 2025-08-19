@@ -30,6 +30,7 @@ class UserPublic(BaseModel):
     email: str
     first_name: str
     last_name: str
+    last_login: Optional[datetime] = None
 
     class Config:
         populate_by_name = True
