@@ -13,26 +13,44 @@ from app.core.security import get_current_user, create_access_token
 
 router = APIRouter()
 
-#POST /api/v1/invitations/send
+# POST /api/v1/invitations/send
 @router.post("/send")
 async def send_invitation(invite: InvitationBase, db=Depends(get_database)):
     if not ObjectId.is_valid(str(invite.company_id)):
         raise HTTPException(status_code=400, detail="Invalid company ID")
-    
+
+    # Check if invitation already exists
+    existing_invite = await db["invitations"].find_one(
+        {"email": invite.email, "company_id": ObjectId(invite.company_id)}
+    )
+
+    # If already accepted, stop here
+    if existing_invite and existing_invite.get("status") == "accepted":
+        return {"message": "This user has already accepted the invitation."}
+
     token = create_invitation_token(invite.email, str(invite.company_id), invite.role)
     invite_link = f"{settings.FRONTEND_URL}/accept-invite?token={token}"
 
-    await db["invitations"].insert_one({
-        "email": invite.email,
-        "company_id": ObjectId(invite.company_id),
-        "role": invite.role,
-        "token": token,
-        "invited_at": datetime.utcnow(),
-        "status": "pending"
-    })
+    # Update if exists (pending or expired), otherwise create new
+    result = await db["invitations"].update_one(
+        {"email": invite.email, "company_id": ObjectId(invite.company_id)},
+        {
+            "$set": {
+                "role": invite.role,
+                "token": token,
+                "invited_at": datetime.utcnow(),
+                "status": "pending"
+            }
+        },
+        upsert=True
+    )
 
     await send_invitation_email(invite.email, invite_link)
-    return {"message": "Invitation sent successfully."}
+
+    if result.matched_count > 0:
+        return {"message": "Invitation updated successfully."}
+    else:
+        return {"message": "Invitation created successfully."}
 
 @router.post("/accept-invitation-token")
 async def accept_invitation_token(

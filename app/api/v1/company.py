@@ -224,6 +224,22 @@ async def delete_membership(
             raise HTTPException(status_code=404, detail="Membership not found")
 
         result = await db.memberships.delete_one({"_id": ObjectId(id)})
+
+        # Remove associated invitations
+        company_id = membership.get("company_id")
+        deleted_user_id = membership.get("user_id")
+        deleted_user = await db.users.find_one({"_id": deleted_user_id})
+        deleted_user_email = deleted_user.get("email") if deleted_user else "Unknown"
+
+        await db["invitations"].delete_many({
+            "email": deleted_user_email,
+            "company_id": company_id
+        })
+
+        deleted_user_membership = await db.memberships.find_one({"user_id": deleted_user_id})
+        if not deleted_user_membership:
+            await db.users.delete_one({"_id": deleted_user_id})
+
     elif status == "pending":
         invitation = await db.invitations.find_one({"_id": ObjectId(id)})
 

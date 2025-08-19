@@ -54,6 +54,11 @@ async def register(user: UserCreate, db=Depends(get_database)):
                 "last_used_at": now
             })
 
+            await db.invitations.update_one(
+                {"token": user.invitation_token},
+                {"$set": {"status": "accepted"}}
+            )
+
             token = create_access_token(data={
                 "sub": user.email,
                 "user_id": user_id,
