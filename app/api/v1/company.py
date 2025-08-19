@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from datetime import datetime
 from app.models.company import CompanyCreate, SimpleCompanyOut, CompanyInDB, UpdateCompanyRequest
 from app.models.user import UserPublic
@@ -179,11 +179,59 @@ async def list_company_members(
         user = await db["users"].find_one({"_id": membership["user_id"]})
         if user:
             memberships.append({
-                "membership_id": str(membership["_id"]),
+                "id": str(membership["_id"]),
                 "email": user["email"],
-                "role": membership["role"]
+                "role": membership["role"],
+                "status": "active"
             })
+
+    invitations_cursor = db["invitations"].find({
+        "company_id": ObjectId(company_id),
+        "status": "pending"
+    })
+
+    async for invitation in invitations_cursor:
+        memberships.append({
+            "id": str(invitation["_id"]),
+            "email": invitation["email"],
+            "role": invitation["role"],
+            "status": "pending"
+        })
 
     if not memberships:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active members found for this company")
     return memberships
+
+@router.delete("/delete-member")
+async def delete_membership(
+    payload: dict = Body(...),  # Expect a JSON body
+    db=Depends(get_database),
+    current_user=Depends(get_current_user)
+):
+    id = payload.get("id")
+    if not id or not ObjectId.is_valid(id):
+        raise HTTPException(status_code=400, detail="Invalid membership ID")
+
+    status = payload.get("status", "active")
+    if status not in ["active", "pending"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    
+    result = None
+    if status == "active":
+        membership = await db.memberships.find_one({"_id": ObjectId(id)})
+
+        if not membership:
+            raise HTTPException(status_code=404, detail="Membership not found")
+
+        result = await db.memberships.delete_one({"_id": ObjectId(id)})
+    elif status == "pending":
+        invitation = await db.invitations.find_one({"_id": ObjectId(id)})
+
+        if not invitation:
+            raise HTTPException(status_code=404, detail="Invitation not found")
+
+        result = await db.invitations.delete_one({"_id": ObjectId(id)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=500, detail="Failed to delete membership")
+
+    return {"success": True, "message": "Membership deleted"}
