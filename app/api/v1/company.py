@@ -203,6 +203,37 @@ async def list_company_members(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active members found for this company")
     return memberships
 
+#GET /api/v1/company/{company_id}/active_members
+@router.get("/{company_id}/active_members", response_model=List[dict])
+async def active_members(
+    company_id: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    if not ObjectId.is_valid(company_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company ID")
+
+    members_cursor = db["memberships"].find({
+        "company_id": ObjectId(company_id),
+        "status": "active"
+    })
+
+    members = []
+    async for membership in members_cursor:
+        user = await db["users"].find_one({"_id": membership["user_id"]})
+        if user:
+            members.append({
+                "id": str(user["_id"]),
+                "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+                "email": user["email"],
+                "role": membership["role"],
+                "status": "active"
+            })
+   
+    if not members:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active members found for this company")
+    return members
+
 @router.delete("/delete-member")
 async def delete_membership(
     payload: dict = Body(...),  # Expect a JSON body

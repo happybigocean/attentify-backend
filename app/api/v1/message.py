@@ -69,9 +69,7 @@ def doc_to_message_detail(doc: dict) -> Message:
 
 @router.get("/", response_model=List[dict])
 async def get_messages(db=Depends(get_database), current_user: dict = Depends(get_current_user)):
-    # Sort by 'last_updated' in descending order
     cursor = db["messages"].find({"user_id": current_user["_id"]}).sort("last_updated", DESCENDING)
-
     messages = []
     async for doc in cursor:
         doc["_id"] = str(doc["_id"]) 
@@ -79,7 +77,27 @@ async def get_messages(db=Depends(get_database), current_user: dict = Depends(ge
         raw_client = doc.get("client", "")
         cleaned_client = extract_name(raw_client)
         doc["client"] = cleaned_client
-        doc.pop("messages", None)  # Remove the 'messages' field if it exists
+
+        # Assigned member
+        member = None
+        assigned_member_id = doc.get("assigned_member_id")
+        if assigned_member_id:
+            try:
+                member_obj = await db["users"].find_one({"_id": assigned_member_id if isinstance(assigned_member_id, ObjectId) else ObjectId(assigned_member_id)})
+                if member_obj:
+                    member_obj["_id"] = str(member_obj["_id"])
+                    # Include only desired member fields
+                    member = {
+                        "id": member_obj["_id"],
+                        "name": f"{member_obj.get('first_name', '')} {member_obj.get('last_name', '')}".strip(),
+                        "email": member_obj.get("email", "")
+                    }
+            except Exception:
+                member = None
+        doc["assigned_to"] = member
+        if "assigned_member_id" in doc and doc["assigned_member_id"]:
+            doc.pop("assigned_member_id", None)
+        doc.pop("messages", None)
         messages.append(doc)
     return messages
 
@@ -97,19 +115,36 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
     return doc
 
 @router.patch("/{message_id}")
-async def update_message_status(
+async def update_message_field(
     message_id: str,
     body: dict = Body(...), 
     db: AsyncIOMotorDatabase = Depends(get_database)
 ):
-    # Use your actual collection name
+    field = body.get("field")
+    value = body.get("value")
+
+    if not field:
+        raise HTTPException(status_code=400, detail="Field is required")
+
+    # Optionally, prevent updates to _id or forbidden fields
+    if field == "_id":
+        raise HTTPException(status_code=400, detail="Cannot update _id field")
+    
+    # Convert to ObjectId where needed
+    if field == "assigned_member_id" and value:
+        try:
+            value = ObjectId(value)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid assigned_member_id")
+
+    # Perform update
     result = await db["messages"].update_one(
         {"_id": ObjectId(message_id)},
-        {"$set": {"status": body.get("status")}}
+        {"$set": {field: value}}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Message not found")
-    return {"message": "Status updated"}
+    return {"message": f"{field} updated"}
 
 @router.post("/analyze_as_list", response_model=list)
 async def analyze_email_message_as_list(
