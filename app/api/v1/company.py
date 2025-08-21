@@ -180,6 +180,7 @@ async def list_company_members(
         if user:
             memberships.append({
                 "id": str(membership["_id"]),
+                "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
                 "email": user["email"],
                 "role": membership["role"],
                 "status": "active"

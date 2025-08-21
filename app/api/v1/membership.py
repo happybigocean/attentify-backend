@@ -40,29 +40,3 @@ async def update_membership(
         "role": update_membership.get("role"),
         "status": update_membership.get("status")
     }
-
-
-@router.delete("/{membership_id}")
-async def delete_membership(
-    membership_id: str,
-    db=Depends(get_database),
-    current_user=Depends(get_current_user)
-):
-    # Ensure valid ObjectId
-    if not ObjectId.is_valid(membership_id):
-        raise HTTPException(status_code=400, detail="Invalid membership ID")
-
-    membership = await db.memberships.find_one({"_id": ObjectId(membership_id)})
-
-    if not membership:
-        raise HTTPException(status_code=404, detail="Membership not found")
-
-    # Optional: Check permissions (e.g., only owner/admin can delete)
-
-    # Delete membership
-    result = await db.memberships.delete_one({"_id": ObjectId(membership_id)})
-
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=500, detail="Failed to delete membership")
-
-    return {"success": True, "message": "Membership deleted"}
