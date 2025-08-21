@@ -24,13 +24,13 @@ class Message(BaseModel):
     participants: List[str] = []  # All unique senders/recipients in the thread
 
     # For compatibility with old logic, keep these if needed:
-    client_id: Optional[str] = None  # e.g. email or phone for chat initiator
-    agent_id: Optional[str] = None
+    client: Optional[str] = None  # e.g. email or phone for chat initiator
+    agent: Optional[str] = None
     session_id: Optional[str] = None
 
     started_at: datetime = Field(default_factory=datetime.utcnow)
     last_updated: datetime = Field(default_factory=datetime.utcnow)
-    status: Literal["open", "closed", "pending"] = "open"
+    status: Literal["Open", "Closed", "Pending", "Resolved", "Escalated", "Awaiting Approval", "Cancelled"] = "Open"
     channel: Literal["chat", "sms", "email", "voice"]
     title: Optional[str] = None
 
@@ -38,6 +38,8 @@ class Message(BaseModel):
     ai_summary: Optional[str] = None
     tags: Optional[List[str]] = []
     resolved_by_ai: bool = False
+
+    assigned_member_id: Optional[PyObjectId] = None  # ID of the team member assigned to this message
 
     class Config:
         allow_population_by_field_name = True

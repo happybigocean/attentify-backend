@@ -31,14 +31,14 @@ def extract_name(email_str: str) -> str:
     return match.group(1).strip() if match else email_str
 
 def doc_to_message(doc: dict) -> Message:
-    # Clean client_id
-    raw_client_id = doc.get("client_id", "")
-    cleaned_client_id = extract_name(raw_client_id)
+    # Clean client
+    raw_client = doc.get("client", "")
+    cleaned_client = extract_name(raw_client)
 
     return Message(
         id=PyObjectId(doc['_id']),
-        client_id=cleaned_client_id,
-        agent_id=doc.get("agent_id"),
+        client=cleaned_client,
+        agent=doc.get("agent"),
         session_id=doc.get("session_id"),
         started_at=doc.get("started_at"),
         last_updated=doc.get("last_updated"),
@@ -53,8 +53,8 @@ def doc_to_message(doc: dict) -> Message:
 def doc_to_message_detail(doc: dict) -> Message:
     return Message(
         id=doc["_id"],
-        client_id=extract_name(doc.get("client_id", "")),
-        agent_id=doc.get("agent_id"),
+        client=extract_name(doc.get("client", "")),
+        agent=doc.get("agent"),
         session_id=doc.get("session_id"),
         started_at=doc.get("started_at"),
         last_updated=doc.get("last_updated"),
@@ -76,9 +76,9 @@ async def get_messages(db=Depends(get_database), current_user: dict = Depends(ge
     async for doc in cursor:
         doc["_id"] = str(doc["_id"]) 
         doc["user_id"] = str(doc["user_id"])
-        raw_client_id = doc.get("client_id", "")
-        cleaned_client_id = extract_name(raw_client_id)
-        doc["client_id"] = cleaned_client_id
+        raw_client = doc.get("client", "")
+        cleaned_client = extract_name(raw_client)
+        doc["client"] = cleaned_client
         doc.pop("messages", None)  # Remove the 'messages' field if it exists
         messages.append(doc)
     return messages
@@ -95,6 +95,21 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
     doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
     doc["user_id"] = str(doc["user_id"])
     return doc
+
+@router.patch("/{message_id}")
+async def update_message_status(
+    message_id: str,
+    body: dict = Body(...), 
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    # Use your actual collection name
+    result = await db["messages"].update_one(
+        {"_id": ObjectId(message_id)},
+        {"$set": {"status": body.get("status")}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"message": "Status updated"}
 
 @router.post("/analyze_as_list", response_model=list)
 async def analyze_email_message_as_list(
@@ -182,7 +197,7 @@ async def reply_to_message(
     # Find latest client message for threading
     client_message = None
     for msg in reversed(message.get("messages", [])):
-        if msg.get("sender") == message.get("client_id"):
+        if msg.get("sender") == message.get("client"):
             client_message = msg
             break
     if not client_message:
@@ -190,7 +205,7 @@ async def reply_to_message(
     
     # Identify Gmail user (agent sending reply)
     agent_id = None
-    agent_id = message.get("agent_id")  # agent_id should be the email of the agent
+    agent_id = message.get("agent")  # agent_id should be the email of the agent
 
     if not agent_id:
         raise HTTPException(status_code=400, detail="No Gmail user found in participants.")
@@ -203,7 +218,7 @@ async def reply_to_message(
     thread_id = message.get("thread_id")
     subject = client_message.get("title", "No Subject")
     original_msg_id = client_message.get("metadata", {}).get("gmail_id")
-    to_addr = message.get("client_id")  # recipient (client)
+    to_addr = message.get("client")  # recipient (client)
 
     if original_msg_id and not original_msg_id.startswith("<"):
         original_msg_id = f"<{original_msg_id}>"
