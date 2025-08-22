@@ -1,6 +1,6 @@
 # app/routes/message.py
 
-from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi import APIRouter, HTTPException, Depends, Body, Query
 from app.services.gmail_service import fetch_all_gmail_accounts, get_gmail_service
 from app.db.mongodb import get_database
 from app.models.message import Message, ChatEntry, PyObjectId 
@@ -102,6 +102,48 @@ async def get_messages(db=Depends(get_database), current_user: dict = Depends(ge
         doc["assigned_to"] = member
         if "assigned_member_id" in doc and doc["assigned_member_id"]:
             doc.pop("assigned_member_id", None)
+        doc.pop("messages", None)
+        messages.append(doc)
+    return messages
+
+@router.get("/company_messages", response_model=List[dict])
+async def get_company_messages(
+    company_id: str = Query(..., description="ID of the company"),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_user: dict = Depends(get_current_user)
+):
+    if not ObjectId.is_valid(company_id):
+        raise HTTPException(status_code=400, detail="Invalid company ID")
+
+    cursor = db["messages"].find({"company_id": ObjectId(company_id)}).sort("last_updated", DESCENDING)
+    messages = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        doc["user_id"] = str(doc["user_id"])
+        doc["company_id"] = str(doc["company_id"])
+        raw_client = doc.get("client", "")
+        cleaned_client = extract_name(raw_client)
+        doc["client"] = cleaned_client
+
+        # Assigned member
+        member = None
+        assigned_member_id = doc.get("assigned_member_id")
+        if assigned_member_id:
+            try:
+                member_obj = await db["users"].find_one(
+                    {"_id": assigned_member_id if isinstance(assigned_member_id, ObjectId) else ObjectId(assigned_member_id)}
+                )
+                if member_obj:
+                    member_obj["_id"] = str(member_obj["_id"])
+                    member = {
+                        "id": member_obj["_id"],
+                        "name": f"{member_obj.get('first_name', '')} {member_obj.get('last_name', '')}".strip(),
+                        "email": member_obj.get("email", "")
+                    }
+            except Exception:
+                member = None
+        doc["assigned_to"] = member
+        doc.pop("assigned_member_id", None)
         doc.pop("messages", None)
         messages.append(doc)
     return messages
