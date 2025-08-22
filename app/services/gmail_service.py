@@ -8,7 +8,7 @@ from bson import ObjectId
 import logging
 import requests
 
-async def fetch_and_save_gmail(account: dict, db, user_id: str):
+async def fetch_and_save_gmail(account: dict, db, user_id: str, company_id: str):
     creds = Credentials(
         token=account["access_token"],
         refresh_token=account["refresh_token"],
@@ -150,6 +150,7 @@ async def fetch_and_save_gmail(account: dict, db, user_id: str):
             else:
                 message_doc = {
                     "user_id": ObjectId(user_id),
+                    "company_id": ObjectId(company_id),
                     "thread_id": thread_id,
                     "participants": list(set([sender, to])),
                     "channel": "email",
@@ -173,7 +174,7 @@ async def fetch_and_save_gmail(account: dict, db, user_id: str):
         logging.exception(f"Error fetching emails for {account['email']}: {str(e)}")
         return f"Failed to fetch emails for {account['email']} due to an error."
     
-async def fetch_all_gmail_accounts(db, user_id: str):
+async def fetch_all_gmail_accounts(db, user_id: str, company_id: str):
     cursor = db["gmail_accounts"].find({"user_id": ObjectId(user_id)})
     results = []
     async for cred in cursor:
@@ -187,7 +188,7 @@ async def fetch_all_gmail_accounts(db, user_id: str):
                 "expires_at": cred.get("expires_at")
             }
 
-            result = await fetch_and_save_gmail(token_data, db, user_id)  # now only 2 args
+            result = await fetch_and_save_gmail(token_data, db, user_id, company_id)  # now only 2 args
             results.append({cred["email"]: result})
         except Exception as e:
             results.append({cred["email"]: f"Error: {str(e)}"})

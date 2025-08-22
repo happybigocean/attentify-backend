@@ -22,8 +22,12 @@ from app.core.security import get_current_user
 router = APIRouter()
 
 @router.post("/fetch-all")
-async def fetch_all(db=Depends(get_database), current_user: dict = Depends(get_current_user)):
-    result = await fetch_all_gmail_accounts(db, user_id=str(current_user["_id"]))
+async def fetch_all(body: dict, db=Depends(get_database), current_user: dict = Depends(get_current_user)):
+    company_id = body.get("company_id", "")
+    if not ObjectId.is_valid(company_id):
+        raise HTTPException(status_code=400, detail="Invalid company ID")
+    
+    result = await fetch_all_gmail_accounts(db, user_id=str(current_user["_id"]), company_id= company_id)
     return {"result": result}
 
 def extract_name(email_str: str) -> str:
@@ -74,6 +78,7 @@ async def get_messages(db=Depends(get_database), current_user: dict = Depends(ge
     async for doc in cursor:
         doc["_id"] = str(doc["_id"]) 
         doc["user_id"] = str(doc["user_id"])
+        doc["company_id"] = str(doc["company_id"])
         raw_client = doc.get("client", "")
         cleaned_client = extract_name(raw_client)
         doc["client"] = cleaned_client
@@ -112,6 +117,9 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
 
     doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
     doc["user_id"] = str(doc["user_id"])
+    doc["company_id"] = str(doc["company_id"])
+    if "assigned_member_id" in doc and doc["assigned_member_id"]:
+        doc["assigned_member_id"] = str(doc["assigned_member_id"])
     return doc
 
 @router.patch("/{message_id}")
