@@ -7,6 +7,10 @@ from datetime import datetime, timedelta
 from app.core.security import get_current_user
 from bson import ObjectId
 import os
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from app.core.config import settings
+import asyncio
 
 from app.models.gmail import (
     GmailAccountCreate,
@@ -32,6 +36,7 @@ def gmail_account_helper(account: dict) -> dict:
         "token_issued_at": account.get("token_issued_at"),
         "is_primary": account.get("is_primary", False),
         "provider": account.get("provider", "google"),
+        "history_id":  account.get("history_id", "")
     }
 
 @router.post("/", response_model=GmailAccountInDB)
@@ -52,7 +57,7 @@ async def create_gmail_account(account: GmailAccountCreate, request: Request):
     account_dict["id"] = str(result.inserted_id)
     return gmail_account_helper(account_dict)
 
-@router.get("/", response_model=List[GmailAccountInDB])
+@router.get("/", response_model=List)
 async def list_gmail_accounts(
     request: Request,
     current_user: dict = Depends(get_current_user)
@@ -139,7 +144,7 @@ async def google_oauth_callback(
     request: Request,
     code: Optional[str] = None,
     error: Optional[str] = None,
-    state: Optional[str] = None,  # ✅ Capture the state
+    state: Optional[str] = None,
 ):
     if error:
         raise HTTPException(status_code=400, detail=f"OAuth error: {error}")
@@ -150,9 +155,9 @@ async def google_oauth_callback(
     if not state or not ObjectId.is_valid(state):
         raise HTTPException(status_code=400, detail="Missing or invalid user_id (state)")
 
-    user_id = ObjectId(state)  # ✅ Extract and validate user_id
+    user_id = ObjectId(state)
 
-    # Exchange authorization code for tokens
+    # Exchange code for tokens
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
             GOOGLE_TOKEN_URL,
@@ -165,18 +170,23 @@ async def google_oauth_callback(
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-        token_data = token_resp.json()
+
+        try:
+            token_data = token_resp.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid token response from Google")
+
         if "error" in token_data:
             raise HTTPException(status_code=400, detail=token_data.get("error_description", "Failed to get tokens"))
 
     access_token = token_data.get("access_token")
-    refresh_token = token_data.get("refresh_token")
+    refresh_token = token_data.get("refresh_token")  # may be None!
     expires_in = token_data.get("expires_in")
 
-    if not access_token or not refresh_token:
-        raise HTTPException(status_code=400, detail="Missing access or refresh token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Missing access token")
 
-    expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+    expires_at = datetime.utcnow() + timedelta(seconds=expires_in or 3600)
 
     # Get user info
     async with httpx.AsyncClient() as client:
@@ -188,7 +198,31 @@ async def google_oauth_callback(
         email = userinfo.get("email")
 
     if not email:
-        raise HTTPException(status_code=400, detail="Failed to retrieve user email from Google")
+        raise HTTPException(status_code=400, detail="Failed to retrieve user email")
+
+    # Build credentials
+    creds = Credentials(
+        token=access_token,
+        refresh_token=refresh_token,  # may be None if reauth
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        scopes=["https://www.googleapis.com/auth/gmail.readonly"]
+    )
+
+    # Call Gmail API in threadpool (avoid blocking)
+    def watch_gmail():
+        gmail = build("gmail", "v1", credentials=creds)
+        watch_request = {
+            "labelIds": ["INBOX"],
+            "topicName": settings.PUBSUB_TOPIC,
+        }
+        return gmail.users().watch(userId="me", body=watch_request).execute()
+
+    loop = asyncio.get_running_loop()
+    watch_response = await loop.run_in_executor(None, watch_gmail)
+
+    history_id = watch_response["historyId"]  # ✅ corrected key
 
     # Save/update Gmail account
     db = request.app.state.db
@@ -198,7 +232,7 @@ async def google_oauth_callback(
         "email": email,
         "user_id": user_id,
         "access_token": access_token,
-        "refresh_token": refresh_token,
+        "refresh_token": refresh_token,  # could be None
         "token_type": "Bearer",
         "expires_at": expires_at,
         "status": "connected",
@@ -206,6 +240,7 @@ async def google_oauth_callback(
         "client_secret": GOOGLE_CLIENT_SECRET,
         "token_issued_at": datetime.utcnow(),
         "provider": "google",
+        "history_id": history_id,
     }
 
     if existing:
@@ -214,3 +249,58 @@ async def google_oauth_callback(
         await db.gmail_accounts.insert_one(account_data)
 
     return RedirectResponse(url=f"{FRONTEND_URL}/accounts/gmail")
+
+# gmail realtime updates workflow
+@router.post("/pubsub/push") 
+async def pubsub_push(request: Request):
+    body = await request.json()
+    message = body.get("message")
+
+    if not message or "data" not in message:
+        return Response(status_code=400)
+    
+    # Decode Pub/Sub base64 payload
+    data = json.loads(base64.b64decode(message["data"]).decode("utf-8"))
+    email_address = data.get("emailAddress")
+    history_id = data.get("historyId")
+
+    print(f"Gmail change detected: {email_address}, historyId: {history_id}")
+
+    account = get_account(email_address)
+
+    if not account:
+        print(f"No account store for {email_address}")
+        return Response(status_code=200)
+    
+    # Load OAuth2 credentials for this Gmail account
+    creds = Credentials.from_authorized_user_info(account["tokens"])
+
+    # Connect Gmail API
+    gmail = build("gmail", "v1", credentials = creds)
+
+    # Fetch history since last known historyId
+    last_history_id = account.get(last_history_id)
+    if last_history_id:
+        results = gmail.users().history().list(
+            userId = "me",
+            startHistoryId = last_history_id
+        ).execute()
+
+        history = results.get("history", [])
+        for record  in history:
+            if "messagesAdded" in record:
+                for added in record["messaged=Added"]:
+                    msg_id = added["message"]["id"]
+                    msg = gmail.users().messages().get(
+                        userId = "me",
+                        id = msg_id,
+                        format = "metadata" 
+                    ).execute()
+                    print(f"New message for {email_address}: {msg.get('snippet')}")
+
+    # Update stored historyId
+    account["last_history_id"] = history_id
+
+    return Response(status_code=200)
+
+

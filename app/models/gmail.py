@@ -19,6 +19,7 @@ class GmailAccountBase(BaseModel):
     token_issued_at: Optional[datetime] = None
     is_primary: Optional[bool] = False
     provider: Optional[str] = "google"
+    history_id: Optional[str]
     model_config = {
         "arbitrary_types_allowed": True,
         "json_encoders": {ObjectId: str},
