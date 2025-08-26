@@ -9,8 +9,13 @@ from bson import ObjectId
 import os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from google.cloud import pubsub_v1
 from app.core.config import settings
 import asyncio
+import json
+import base64
+from app.db.mongodb import get_database
+from app.services.gmail_service import get_gmail_service
 
 from app.models.gmail import (
     GmailAccountCreate,
@@ -180,7 +185,7 @@ async def google_oauth_callback(
             raise HTTPException(status_code=400, detail=token_data.get("error_description", "Failed to get tokens"))
 
     access_token = token_data.get("access_token")
-    refresh_token = token_data.get("refresh_token")  # may be None!
+    refresh_token = token_data.get("refresh_token")
     expires_in = token_data.get("expires_in")
 
     if not access_token:
@@ -203,7 +208,7 @@ async def google_oauth_callback(
     # Build credentials
     creds = Credentials(
         token=access_token,
-        refresh_token=refresh_token,  # may be None if reauth
+        refresh_token=refresh_token,
         token_uri="https://oauth2.googleapis.com/token",
         client_id=GOOGLE_CLIENT_ID,
         client_secret=GOOGLE_CLIENT_SECRET,
@@ -215,14 +220,30 @@ async def google_oauth_callback(
         gmail = build("gmail", "v1", credentials=creds)
         watch_request = {
             "labelIds": ["INBOX"],
-            "topicName": settings.PUBSUB_TOPIC,
+            "topicName": f"projects/{settings.PUBSUB_PROJECT}/topics/{settings.PUBSUB_TOPIC}",
         }
         return gmail.users().watch(userId="me", body=watch_request).execute()
 
     loop = asyncio.get_running_loop()
     watch_response = await loop.run_in_executor(None, watch_gmail)
 
-    history_id = watch_response["historyId"]  # ✅ corrected key
+    history_id = watch_response["historyId"]
+
+    # ✅ Ensure Pub/Sub subscription exists
+    def ensure_subscription():
+        subscriber = pubsub_v1.SubscriberClient()
+        topic_path = subscriber.topic_path(settings.PUBSUB_PROJECT, settings.PUBSUB_TOPIC)
+        subscription_path = subscriber.subscription_path(settings.PUBSUB_PROJECT, settings.PUBSUB_SUBSCRIPTION)
+
+        try:
+            subscriber.get_subscription(request={"subscription": subscription_path})
+        except Exception:
+            subscriber.create_subscription(
+                request={"name": subscription_path, "topic": topic_path}
+            )
+        return subscription_path
+
+    subscription_path = await loop.run_in_executor(None, ensure_subscription)
 
     # Save/update Gmail account
     db = request.app.state.db
@@ -232,7 +253,7 @@ async def google_oauth_callback(
         "email": email,
         "user_id": user_id,
         "access_token": access_token,
-        "refresh_token": refresh_token,  # could be None
+        "refresh_token": refresh_token,
         "token_type": "Bearer",
         "expires_at": expires_at,
         "status": "connected",
@@ -241,6 +262,7 @@ async def google_oauth_callback(
         "token_issued_at": datetime.utcnow(),
         "provider": "google",
         "history_id": history_id,
+        "subscription": subscription_path,  # ✅ store subscription
     }
 
     if existing:
@@ -252,7 +274,7 @@ async def google_oauth_callback(
 
 # gmail realtime updates workflow
 @router.post("/pubsub/push") 
-async def pubsub_push(request: Request):
+async def pubsub_push(request: Request, db = Depends(get_database)):
     body = await request.json()
     message = body.get("message")
 
@@ -266,20 +288,17 @@ async def pubsub_push(request: Request):
 
     print(f"Gmail change detected: {email_address}, historyId: {history_id}")
 
-    account = get_account(email_address)
+    account = db["gmail_accounts"].find_one({"email": email_address})
 
     if not account:
         print(f"No account store for {email_address}")
         return Response(status_code=200)
-    
-    # Load OAuth2 credentials for this Gmail account
-    creds = Credentials.from_authorized_user_info(account["tokens"])
 
     # Connect Gmail API
-    gmail = build("gmail", "v1", credentials = creds)
+    gmail = get_gmail_service(account)
 
     # Fetch history since last known historyId
-    last_history_id = account.get(last_history_id)
+    last_history_id = account.get("history_id")
     if last_history_id:
         results = gmail.users().history().list(
             userId = "me",
@@ -299,7 +318,7 @@ async def pubsub_push(request: Request):
                     print(f"New message for {email_address}: {msg.get('snippet')}")
 
     # Update stored historyId
-    account["last_history_id"] = history_id
+    account["history_id"] = history_id
 
     return Response(status_code=200)
 

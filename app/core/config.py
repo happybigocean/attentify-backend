@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str 
     FRONTEND_URL: str = "http://localhost:5173"
     PUBSUB_TOPIC: str
+    PUBSUB_PROJECT: str
+    PUBSUB_SUBSCRIPTION: str
 
     class Config:
         env_file = ".env"
