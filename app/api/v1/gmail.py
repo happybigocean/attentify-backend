@@ -280,7 +280,7 @@ async def google_oauth_callback(
 
     return RedirectResponse(url=f"{FRONTEND_URL}/accounts/gmail")
 
-# gmail realtime updates workflow
+#/api/v1/gmail/pubsub/push
 @router.post("/pubsub/push") 
 async def pubsub_push(request: Request, db = Depends(get_database)):
     body = await request.json()
@@ -296,7 +296,7 @@ async def pubsub_push(request: Request, db = Depends(get_database)):
 
     print(f"Gmail change detected: {email_address}, historyId: {history_id}")
 
-    account = db["gmail_accounts"].find_one({"email": email_address})
+    account = await db["gmail_accounts"].find_one({"email": email_address})
 
     if not account:
         print(f"No account store for {email_address}")
