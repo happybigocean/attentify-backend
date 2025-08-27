@@ -16,6 +16,7 @@ import json
 import base64
 from app.db.mongodb import get_database
 from app.services.gmail_service import get_gmail_service
+from google.oauth2 import service_account
 
 from app.models.gmail import (
     GmailAccountCreate,
@@ -230,8 +231,15 @@ async def google_oauth_callback(
     history_id = watch_response["historyId"]
 
     # ✅ Ensure Pub/Sub subscription exists
+    service_account_info = json.loads(settings.SERVICE_ACCOUNT_JSON)
+
+    credentials = service_account.Credentials.from_service_account_info(
+        service_account_info,
+        scopes=["https://www.googleapis.com/auth/pubsub"]
+    )
+
     def ensure_subscription():
-        subscriber = pubsub_v1.SubscriberClient()
+        subscriber = pubsub_v1.SubscriberClient(credentials=credentials)
         topic_path = subscriber.topic_path(settings.PUBSUB_PROJECT, settings.PUBSUB_TOPIC)
         subscription_path = subscriber.subscription_path(settings.PUBSUB_PROJECT, settings.PUBSUB_SUBSCRIPTION)
 

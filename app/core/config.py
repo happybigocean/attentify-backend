@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     PUBSUB_TOPIC: str
     PUBSUB_PROJECT: str
     PUBSUB_SUBSCRIPTION: str
+    SERVICE_ACCOUNT_JSON: str
 
     class Config:
         env_file = ".env"
