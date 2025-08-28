@@ -403,7 +403,7 @@ async def pubsub_push(request: Request, db=Depends(get_database)):
                     full_msg = service.users().messages().get(
                         userId="me",
                         id=gmail_id,
-                        format="metadata" 
+                        format="full" 
                     ).execute()
                 except Exception:
                     logger.error("Failed fetching Gmail message %s", gmail_id, exc_info=True)
