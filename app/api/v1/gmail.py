@@ -27,6 +27,7 @@ from app.models.gmail import (
 
 from app.models.message import Message, ChatEntry 
 from app.utils.logger import logger
+from app.main import sio
 
 router = APIRouter()
 
@@ -515,6 +516,16 @@ async def pubsub_push(request: Request, db=Depends(get_database)):
                     }
                     await db["messages"].insert_one(message_doc)
 
+                await sio.emit(
+                    "gmail_update",
+                    {
+                        "user_id": str(user_id),
+                        "company_id": str(company_id),
+                        "email": email_address,
+                        "message": f"New messages pushed for {email_address}"
+                    }
+                )
+                
     await db["gmail_accounts"].update_one(
         {"_id": account["_id"]},
         {"$set": {"history_id": history_id}}

@@ -8,8 +8,17 @@ from dotenv import load_dotenv
 load_dotenv()  # Load from .env at startup
 from app.db.mongodb import get_database
 
-# CORS origins
+import socketio
+
 origins = os.getenv("ORIGINS", "http://localhost:5173").split(",")
+
+# Create Socket.IO server
+sio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins=[origin.strip() for origin in origins]
+)
+
+# CORS origins
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "attentify")
 from starlette.middleware.sessions import SessionMiddleware
@@ -33,6 +42,10 @@ async def lifespan(app: FastAPI):
     mongo_client.close()
 
 app = FastAPI(title="Attentify APP", lifespan=lifespan)
+
+# Mount Socket.IO app inside FastAPI
+socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
+
 app.add_middleware(SessionMiddleware, secret_key="supersecret")
 # CORS setup
 app.add_middleware(
@@ -42,6 +55,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Example event
+@sio.event
+async def connect(sid, environ):
+    print("Client connected:", sid)
+
+@sio.event
+async def disconnect(sid):
+    print("Client disconnected:", sid)
+
+# Custom event
+@sio.event
+async def ping_from_client(sid, data):
+    print("Received:", data)
+    await sio.emit("pong_from_server", {"msg": "pong!"}, to=sid)
 
 # Routers
 from app.api.v1 import auth

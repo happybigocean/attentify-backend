@@ -98,9 +98,9 @@ pytest
 
 - **Run with hot reload:**  
   `.\venv\Scripts\Activate.ps1`
-  `uvicorn app.main:app --reload`
+  `uvicorn app.main:socket_app --reload`
 - **Run in production (example):**  
-  `gunicorn -k uvicorn.workers.UvicornWorker app.main:app`
+  `gunicorn -k uvicorn.workers.UvicornWorker app.main:socket_app`
 
 ---
 
