@@ -109,9 +109,31 @@ async def update_gmail_account(account_id: str, update: GmailAccountUpdate, requ
 @router.delete("/{account_id}", status_code=204)
 async def delete_gmail_account(account_id: str, request: Request):
     db = request.app.state.db
+    account = await db.gmail_accounts.find_one({"_id": ObjectId(account_id)})
+    if not account:
+        raise HTTPException(status_code=404, detail="Gmail account not found")
+
+    # Step 1: Stop Gmail Watch for this user
+    try:
+        creds = Credentials(
+            token=account['access_token'],
+            refresh_token=account.get('refresh_token'),
+            token_uri=account.get('token_uri', 'https://oauth2.googleapis.com/token'),
+            client_id=account['client_id'],
+            client_secret=account['client_secret'],
+            scopes=account.get('scopes', ['https://www.googleapis.com/auth/gmail.modify', 'https://www.googleapis.com/auth/gmail.readonly']),
+        )
+        service = build('gmail', 'v1', credentials=creds)
+        service.users().stop(userId="me").execute()
+    except Exception as e:
+        # Don't block delete if Gmail stop fails
+        print(f"Failed to stop watch for {account['email']}: {e}")
+
+    # Step 2: Delete from DB
     result = await db.gmail_accounts.delete_one({"_id": ObjectId(account_id)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Gmail account not found")
+
     return None
 
 # Environment variables for Google OAuth
