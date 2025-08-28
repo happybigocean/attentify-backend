@@ -7,6 +7,7 @@ from app.utils.bson import PyObjectId
 
 class GmailAccountBase(BaseModel):
     user_id: PyObjectId = Field(...)
+    company_id: PyObjectId = Field(...)
     email: EmailStr
     access_token: str
     refresh_token: str

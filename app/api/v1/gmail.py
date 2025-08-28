@@ -14,6 +14,7 @@ from app.core.config import settings
 import asyncio
 import json
 import base64
+import urllib.parse
 from app.db.mongodb import get_database
 from app.services.gmail_service import get_gmail_service
 from google.oauth2 import service_account
@@ -63,14 +64,15 @@ async def create_gmail_account(account: GmailAccountCreate, request: Request):
     account_dict["id"] = str(result.inserted_id)
     return gmail_account_helper(account_dict)
 
-@router.get("/", response_model=List)
+@router.get("/company_accounts/{company_id}", response_model=List)
 async def list_gmail_accounts(
+    company_id: str, 
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     db = request.app.state.db
     
-    accounts_cursor = db.gmail_accounts.find({"user_id": current_user["_id"]})
+    accounts_cursor = db.gmail_accounts.find({"company_id": ObjectId(company_id)})
     accounts = []
     async for account in accounts_cursor:
         accounts.append(gmail_account_helper(account))
@@ -147,23 +149,31 @@ GOOGLE_SCOPE = "https://www.googleapis.com/auth/gmail.readonly https://www.googl
 
 #/api/v1/gmail/oauth/login
 @router.get("/oauth/login")
-async def google_oauth_login(user_id: str):
+async def google_oauth_login(user_id: str, company_id: str):
     """
-    Starts the OAuth flow by redirecting to Google with the user's ID in state
+    Starts the OAuth flow by redirecting to Google with the user's ID and company ID in state
     """
     if not ObjectId.is_valid(user_id):
         raise HTTPException(status_code=400, detail="Invalid user_id format")
+    
+    if not ObjectId.is_valid(company_id):
+        raise HTTPException(status_code=400, detail="Invalid company_id format")
+
+    # Pack user_id and company_id into state (JSON then urlencode)
+    state = json.dumps({"user_id": user_id, "company_id": company_id})
+    state_encoded = urllib.parse.quote(state)
 
     auth_url = (
-        f"https://accounts.google.com/o/oauth2/v2/auth"
+        "https://accounts.google.com/o/oauth2/v2/auth"
         f"?client_id={GOOGLE_CLIENT_ID}"
         f"&redirect_uri={GOOGLE_REDIRECT_URI}"
         f"&response_type=code"
         f"&scope=email%20profile%20https://www.googleapis.com/auth/gmail.readonly%20https://www.googleapis.com/auth/gmail.send%20https://www.googleapis.com/auth/userinfo.email"
-        f"&state={user_id}"  # ✅ Attach user_id here
         f"&access_type=offline"
         f"&prompt=consent"
+        f"&state={state_encoded}"
     )
+
     return RedirectResponse(url=auth_url)
 
 #/api/v1/gmail/oauth/callback
@@ -180,10 +190,27 @@ async def google_oauth_callback(
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
 
-    if not state or not ObjectId.is_valid(state):
-        raise HTTPException(status_code=400, detail="Missing or invalid user_id (state)")
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing state parameter")
 
-    user_id = ObjectId(state)
+    try:
+        # Decode and parse state
+        decoded_state = urllib.parse.unquote(state)
+        state_data = json.loads(decoded_state)
+
+        user_id = state_data.get("user_id")
+        company_id = state_data.get("company_id")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid state: {str(e)}")
+
+    if not user_id or not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Missing or invalid user_id")
+    
+    if not company_id or not ObjectId.is_valid(company_id):
+        raise HTTPException(status_code=400, detail="Missing or invalid company_id")
+
+    user_id = ObjectId(user_id)
+    company_id = ObjectId(company_id)
 
     # Exchange code for tokens
     async with httpx.AsyncClient() as client:
@@ -282,6 +309,7 @@ async def google_oauth_callback(
     account_data = {
         "email": email,
         "user_id": user_id,
+        "company_id": company_id,
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "Bearer",
