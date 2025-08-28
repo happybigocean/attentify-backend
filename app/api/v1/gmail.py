@@ -18,12 +18,15 @@ import urllib.parse
 from app.db.mongodb import get_database
 from app.services.gmail_service import get_gmail_service
 from google.oauth2 import service_account
-
+from email.utils import parsedate_to_datetime
 from app.models.gmail import (
     GmailAccountCreate,
     GmailAccountUpdate,
     GmailAccountInDB
 )
+
+from app.models.message import Message, ChatEntry 
+from app.utils.logger import logger
 
 router = APIRouter()
 
@@ -332,52 +335,194 @@ async def google_oauth_callback(
 
 #/api/v1/gmail/pubsub/push
 @router.post("/pubsub/push") 
-async def pubsub_push(request: Request, db = Depends(get_database)):
-    body = await request.json()
-    message = body.get("message")
-
-    if not message or "data" not in message:
+async def pubsub_push(request: Request, db=Depends(get_database)):
+    try:
+        body = await request.json()
+    except Exception as e:
+        logger.error("Invalid JSON payload from Pub/Sub", exc_info=True)
         return Response(status_code=400)
-    
-    # Decode Pub/Sub base64 payload
-    data = json.loads(base64.b64decode(message["data"]).decode("utf-8"))
+
+    message = body.get("message")
+    if not message or "data" not in message:
+        logger.warning("Pub/Sub message missing 'data' field")
+        return Response(status_code=400)
+
+    try:
+        # Decode Pub/Sub base64 payload
+        data = json.loads(base64.urlsafe_b64decode(message["data"]).decode("utf-8"))
+    except Exception:
+        logger.error("Failed to decode Pub/Sub data", exc_info=True)
+        return Response(status_code=400)
+
     email_address = data.get("emailAddress")
     history_id = data.get("historyId")
 
-    print(f"Gmail change detected: {email_address}, historyId: {history_id}")
-
-    account = await db["gmail_accounts"].find_one({"email": email_address})
-
-    if not account:
-        print(f"No account store for {email_address}")
+    if not email_address or not history_id:
+        logger.warning("Pub/Sub payload missing emailAddress or historyId: %s", data)
         return Response(status_code=200)
 
-    # Connect Gmail API
-    gmail = get_gmail_service(account)
+    logger.info("📩 Gmail change detected", extra={"email": email_address, "historyId": history_id})
 
-    # Fetch history since last known historyId
+    account = await db["gmail_accounts"].find_one({"email": email_address})
+    if not account:
+        logger.info("No account found for %s", email_address)
+        return Response(status_code=200)
+
+    user_id = account["user_id"]
+    company_id = account["company_id"]
+
+    try:
+        service = get_gmail_service(account)
+    except Exception:
+        logger.error("Failed to initialize Gmail API service for %s", email_address, exc_info=True)
+        return Response(status_code=500)
+
     last_history_id = account.get("history_id")
-    if last_history_id:
-        results = gmail.users().history().list(
-            userId = "me",
-            startHistoryId = last_history_id
-        ).execute()
+    if not last_history_id:
+        logger.debug("No stored historyId for %s. Skipping history fetch.", email_address)
+    else:
+        try:
+            results = service.users().history().list(
+                userId="me",
+                startHistoryId=last_history_id
+            ).execute()
 
-        history = results.get("history", [])
-        for record  in history:
-            if "messagesAdded" in record:
-                for added in record["messaged=Added"]:
-                    msg_id = added["message"]["id"]
-                    msg = gmail.users().messages().get(
-                        userId = "me",
-                        id = msg_id,
-                        format = "metadata" 
+            history = results.get("history", [])
+        except Exception:
+            logger.error("Failed fetching Gmail history for %s", email_address, exc_info=True)
+            return Response(status_code=500)
+
+        for record in history:
+            if "messagesAdded" not in record:
+                continue
+
+            for added in record["messagesAdded"]:
+                gmail_id = added["message"]["id"]
+
+                try:
+                    full_msg = service.users().messages().get(
+                        userId="me",
+                        id=gmail_id,
+                        format="metadata" 
                     ).execute()
-                    print(f"New message for {email_address}: {msg.get('snippet')}")
+                except Exception:
+                    logger.error("Failed fetching Gmail message %s", gmail_id, exc_info=True)
+                    continue
 
-    # Update stored historyId
-    account["history_id"] = history_id
+                thread_id = full_msg.get("threadId", gmail_id)
+                payload = full_msg.get("payload", {}) or {}
+                headers = payload.get("headers", [])
 
+                subject = next((h["value"] for h in headers if h["name"] == "Subject"), "")
+                sender = next((h["value"] for h in headers if h["name"] == "From"), "")
+                to = next((h["value"] for h in headers if h["name"] == "To"), "")
+                date = next((h["value"] for h in headers if h["name"] == "Date"), "")
+
+                try:
+                    timestamp = parsedate_to_datetime(date)
+                except Exception:
+                    timestamp = datetime.utcnow()
+
+                # --- Extract bodies ---
+                text_body, html_body = "", ""
+
+                def extract_bodies(payload):
+                    nonlocal text_body, html_body
+                    if "parts" in payload:
+                        for part in payload["parts"]:
+                            mime_type = part.get("mimeType")
+                            data = part["body"].get("data", "")
+                            if data:
+                                decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+                                if mime_type == "text/plain" and not text_body:
+                                    text_body = decoded
+                                elif mime_type == "text/html" and not html_body:
+                                    html_body = decoded
+                            if "parts" in part:
+                                extract_bodies(part)
+                    else:
+                        data = payload.get("body", {}).get("data", "")
+                        if data:
+                            decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+                            mime_type = payload.get("mimeType")
+                            if mime_type == "text/plain":
+                                text_body = decoded
+                            elif mime_type == "text/html":
+                                html_body = decoded
+
+                extract_bodies(payload)
+                content = html_body if html_body else text_body
+
+                chat_entry = ChatEntry(
+                    sender=sender,
+                    recipient=to,
+                    content=content,
+                    title=subject,
+                    timestamp=timestamp,
+                    channel="email",
+                    message_type="html" if html_body else "text",
+                    metadata={
+                        "gmail_id": gmail_id,
+                        "from": sender,
+                        "to": to,
+                        "subject": subject,
+                        "date": date
+                    }
+                )
+
+                existing_thread = await db["messages"].find_one(
+                    {"user_id": ObjectId(user_id), "thread_id": thread_id, "channel": "email"}
+                )
+
+                if existing_thread:
+                    if any(m.get("metadata", {}).get("gmail_id") == gmail_id for m in existing_thread.get("messages", [])):
+                        logger.debug("Duplicate Gmail %s ignored for thread %s", gmail_id, thread_id)
+                        continue
+
+                    participants = existing_thread.get("participants", [])
+                    for p in [sender, to]:
+                        if p not in participants:
+                            participants.append(p)
+
+                    await db["messages"].update_one(
+                        {"_id": existing_thread["_id"]},
+                        {
+                            "$push": {"messages": chat_entry.dict()},
+                            "$set": {
+                                "last_updated": timestamp,
+                                "title": subject,
+                                "participants": participants
+                            }
+                        }
+                    )
+                else:
+                    message_doc = {
+                        "user_id": ObjectId(user_id),
+                        "company_id": ObjectId(company_id),
+                        "thread_id": thread_id,
+                        "participants": list(set([sender, to])),
+                        "channel": "email",
+                        "status": "Open",
+                        "title": subject,
+                        "client": sender,
+                        "agent": to,
+                        "messages": [chat_entry.dict()],
+                        "last_updated": timestamp,
+                        "started_at": timestamp,
+                        "ai_summary": None,
+                        "tags": [],
+                        "resolved_by_ai": False
+                    }
+                    await db["messages"].insert_one(message_doc)
+
+    # ✅ Always update history_id so we don't process duplicates next time
+    await db["gmail_accounts"].update_one(
+        {"_id": account["_id"]},
+        {"$set": {"history_id": history_id}}
+    )
+
+    logger.info("✅ Processed Gmail Pub/Sub for %s up to historyId=%s", email_address, history_id)
     return Response(status_code=200)
+
 
 
