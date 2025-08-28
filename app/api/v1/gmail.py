@@ -460,7 +460,7 @@ async def pubsub_push(request: Request, db=Depends(get_database)):
                     title=subject,
                     timestamp=timestamp,
                     channel="email",
-                    message_type="html" if html_body else "text",
+                    message_type="html",
                     metadata={
                         "gmail_id": gmail_id,
                         "from": sender,
@@ -515,7 +515,6 @@ async def pubsub_push(request: Request, db=Depends(get_database)):
                     }
                     await db["messages"].insert_one(message_doc)
 
-    # ✅ Always update history_id so we don't process duplicates next time
     await db["gmail_accounts"].update_one(
         {"_id": account["_id"]},
         {"$set": {"history_id": history_id}}
