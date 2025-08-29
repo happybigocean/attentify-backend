@@ -409,7 +409,10 @@ async def pubsub_push(request: Request, db=Depends(get_database)):
                 except Exception:
                     logger.error("Failed fetching Gmail message %s", gmail_id, exc_info=True)
                     continue
-
+                
+                labels = full_msg.get("labelIds", [])
+                if "INBOX" not in labels:
+                    continue
                 thread_id = full_msg.get("threadId", gmail_id)
                 payload = full_msg.get("payload", {}) or {}
                 headers = payload.get("headers", [])
