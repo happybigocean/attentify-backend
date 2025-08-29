@@ -115,15 +115,34 @@ async def get_company_messages(
     if not ObjectId.is_valid(company_id):
         raise HTTPException(status_code=400, detail="Invalid company ID")
 
-    cursor = db["messages"].find({"company_id": ObjectId(company_id)}).sort("last_updated", DESCENDING)
+    # ✅ await find_one
+    membership = await db["memberships"].find_one(
+        {"user_id": current_user["_id"], "company_id": ObjectId(company_id)}
+    )
+    if not membership:
+        raise HTTPException(status_code=403, detail="User is not a member of this company")
+
+    role = membership.get("role")
+    cursor = None
+
+    if role == "company_owner":
+        cursor = db["messages"].find({"company_id": ObjectId(company_id)}).sort("last_updated", DESCENDING)
+    elif role == "store_owner":
+        cursor = db["messages"].find({"user_id": current_user["_id"]}).sort("last_updated", DESCENDING)
+    elif role == "agent":
+        cursor = db["messages"].find({"assigned_member_id": current_user["_id"]}).sort("last_updated", DESCENDING)
+    else:
+        cursor = db["messages"].find({"user_id": current_user["_id"]}).sort("last_updated", DESCENDING)
+
     messages = []
     async for doc in cursor:
         doc["_id"] = str(doc["_id"])
         doc["user_id"] = str(doc["user_id"])
         doc["company_id"] = str(doc["company_id"])
+
+        # Clean client name
         raw_client = doc.get("client", "")
-        cleaned_client = extract_name(raw_client)
-        doc["client"] = cleaned_client
+        doc["client"] = extract_name(raw_client)
 
         # Assigned member
         member = None
@@ -143,9 +162,13 @@ async def get_company_messages(
             except Exception:
                 member = None
         doc["assigned_to"] = member
+
+        # Cleanup unused fields
         doc.pop("assigned_member_id", None)
         doc.pop("messages", None)
+
         messages.append(doc)
+
     return messages
 
 @router.get("/{id}", response_model=dict)
