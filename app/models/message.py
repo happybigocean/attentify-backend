@@ -32,6 +32,7 @@ class Message(BaseModel):
     started_at: datetime = Field(default_factory=datetime.utcnow)
     last_updated: datetime = Field(default_factory=datetime.utcnow)
     status: Literal["Open", "Closed", "Pending", "Resolved", "Escalated", "Awaiting Approval", "Cancelled"] = "Open"
+    trashed: bool = False
     channel: Literal["chat", "sms", "email", "voice"]
     title: Optional[str] = None
 
