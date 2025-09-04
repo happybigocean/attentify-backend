@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException, Response, Depends
+from fastapi import APIRouter, Request, HTTPException, Response, Depends, Body
 from fastapi.responses import RedirectResponse
 from typing import List, Optional
 import httpx
@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 from datetime import datetime, timedelta
 from app.core.security import get_current_user
 from bson import ObjectId
+from motor.motor_asyncio import AsyncIOMotorDatabase
 import os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -47,7 +48,8 @@ def gmail_account_helper(account: dict) -> dict:
         "token_issued_at": account.get("token_issued_at"),
         "is_primary": account.get("is_primary", False),
         "provider": account.get("provider", "google"),
-        "history_id":  account.get("history_id", "")
+        "history_id":  account.get("history_id", ""),
+        "store": account.get("store", "")
     }
 
 @router.post("/", response_model=GmailAccountInDB)
@@ -79,7 +81,13 @@ async def list_gmail_accounts(
     accounts_cursor = db.gmail_accounts.find({"company_id": ObjectId(company_id)})
     accounts = []
     async for account in accounts_cursor:
-        accounts.append(gmail_account_helper(account))
+        owner = await db.users.find_one({"_id": account["user_id"]})
+        if not owner:
+            continue
+        accounts_data = gmail_account_helper(account)
+        accounts_data["owner_email"] = owner.get("email", "unknown")
+        accounts_data["owner_name"] = owner.get("first_name", "unknown") + " " + owner.get("last_name", "unknown")
+        accounts.append(accounts_data)
 
     return accounts
 
@@ -111,6 +119,32 @@ async def update_gmail_account(account_id: str, update: GmailAccountUpdate, requ
 
     account = await db.gmail_accounts.find_one({"_id": ObjectId(account_id)})
     return gmail_account_helper(account)
+
+@router.put("/{id}/store")
+async def update_gmail_account(
+    id: str,
+    body: dict = Body(...), 
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    field = body.get("field")
+    value = body.get("value")
+
+    if not field:
+        raise HTTPException(status_code=400, detail="Field is required")
+
+    # Optionally, prevent updates to _id or forbidden fields
+    if field == "_id":
+        raise HTTPException(status_code=400, detail="Cannot update _id field")
+    
+    # Perform update
+    result = await db["gmail_accounts"].update_one(
+        {"_id": ObjectId(id)},
+        {"$set": {field: value}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Gmail account not found")
+    return {"message": f"{field} updated"}
+
 
 @router.delete("/{account_id}", status_code=204)
 async def delete_gmail_account(account_id: str, request: Request):
