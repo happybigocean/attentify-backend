@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, Response, Depends, Body
 from fastapi.responses import RedirectResponse
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import httpx
 from urllib.parse import urlencode
 from datetime import datetime, timedelta
@@ -70,16 +70,16 @@ async def create_gmail_account(account: GmailAccountCreate, request: Request):
     account_dict["id"] = str(result.inserted_id)
     return gmail_account_helper(account_dict)
 
-@router.get("/company_accounts/{company_id}", response_model=List)
+@router.get("/company_accounts/{company_id}")
 async def list_gmail_accounts(
     company_id: str, 
     db: AsyncIOMotorDatabase = Depends(get_database),
     current_user: dict = Depends(get_current_user)
-):
+) -> Dict[str, Any]:
     if not ObjectId.is_valid(company_id):
         raise HTTPException(status_code=400, detail="Invalid company ID")
     
-    # ✅ await find_one
+    # ✅ check membership
     membership = await db["memberships"].find_one(
         {"user_id": current_user["_id"], "company_id": ObjectId(company_id)}
     )
@@ -88,28 +88,46 @@ async def list_gmail_accounts(
         raise HTTPException(status_code=403, detail="User is not a member of this company")
     
     role = membership.get("role")
-    cursor = None
 
     if role == "company_owner":
         accounts_cursor = db.gmail_accounts.find({"company_id": ObjectId(company_id)})
     elif role == "store_owner":
         accounts_cursor = db.gmail_accounts.find({"user_id": current_user["_id"]})
-    elif role == "agent":
+    else:  # agent and fallback
         accounts_cursor = db.gmail_accounts.find({"company_id": ObjectId(company_id)})
-    else:
-        accounts_cursor = db.gmail_accounts.find({"company_id": ObjectId(company_id)})
-
+    
     accounts = []
     async for account in accounts_cursor:
         owner = await db.users.find_one({"_id": account["user_id"]})
         if not owner:
             continue
-        accounts_data = gmail_account_helper(account)
-        accounts_data["owner_email"] = owner.get("email", "unknown")
-        accounts_data["owner_name"] = owner.get("first_name", "unknown") + " " + owner.get("last_name", "unknown")
-        accounts.append(accounts_data)
+        account_data = gmail_account_helper(account)
+        account_data["owner_email"] = owner.get("email", "unknown")
+        account_data["owner_name"] = f"{owner.get('first_name', 'unknown')} {owner.get('last_name', 'unknown')}"
+        if account.get("store_id"):
+            store = await db.shopify_cred.find_one({"_id": account["store_id"]})
+            if store:
+                print(store)
+                account_data["store"] = {
+                    "id": str(store["_id"]),
+                    "shop": store.get("shop", "")
+                }
+        accounts.append(account_data)
 
-    return accounts
+    # ✅ fetch stores properly
+    stores_cursor = db.shopify_cred.find({"user_id": current_user["_id"]})
+    stores = []
+
+    async for store in stores_cursor:
+        stores.append({
+            "id": str(store["_id"]),
+            "shop": store.get("shop", "")
+        })
+
+    return {
+        "accounts": accounts,
+        "stores": stores
+    }
 
 @router.get("/{account_id}", response_model=GmailAccountInDB)
 async def get_gmail_account(account_id: str, request: Request):
@@ -152,17 +170,31 @@ async def update_gmail_account(
     if not field:
         raise HTTPException(status_code=400, detail="Field is required")
 
-    # Optionally, prevent updates to _id or forbidden fields
     if field == "_id":
         raise HTTPException(status_code=400, detail="Cannot update _id field")
     
-    # Perform update
+    update_query = {}
+
+    if field == "store_id":
+        if value == "":  # Remove store_id if empty string
+            update_query = {"$unset": {field: ""}}
+        else:
+            try:
+                value = ObjectId(value)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid store_id format")
+            update_query = {"$set": {field: value}}
+    else:
+        update_query = {"$set": {field: value}}
+
     result = await db["gmail_accounts"].update_one(
         {"_id": ObjectId(id)},
-        {"$set": {field: value}}
+        update_query
     )
+
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Gmail account not found")
+
     return {"message": f"{field} updated"}
 
 

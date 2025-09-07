@@ -21,7 +21,7 @@ class GmailAccountBase(BaseModel):
     is_primary: Optional[bool] = False
     provider: Optional[str] = "google"
     history_id: Optional[str]
-    store: Optional[str]
+    store_id: Optional[PyObjectId] = Field(...)
     model_config = {
         "arbitrary_types_allowed": True,
         "json_encoders": {ObjectId: str},
