@@ -73,12 +73,32 @@ async def create_gmail_account(account: GmailAccountCreate, request: Request):
 @router.get("/company_accounts/{company_id}", response_model=List)
 async def list_gmail_accounts(
     company_id: str, 
-    request: Request,
+    db: AsyncIOMotorDatabase = Depends(get_database),
     current_user: dict = Depends(get_current_user)
 ):
-    db = request.app.state.db
+    if not ObjectId.is_valid(company_id):
+        raise HTTPException(status_code=400, detail="Invalid company ID")
     
-    accounts_cursor = db.gmail_accounts.find({"company_id": ObjectId(company_id)})
+    # ✅ await find_one
+    membership = await db["memberships"].find_one(
+        {"user_id": current_user["_id"], "company_id": ObjectId(company_id)}
+    )
+
+    if not membership:
+        raise HTTPException(status_code=403, detail="User is not a member of this company")
+    
+    role = membership.get("role")
+    cursor = None
+
+    if role == "company_owner":
+        accounts_cursor = db.gmail_accounts.find({"company_id": ObjectId(company_id)})
+    elif role == "store_owner":
+        accounts_cursor = db.gmail_accounts.find({"user_id": current_user["_id"]})
+    elif role == "agent":
+        accounts_cursor = db.gmail_accounts.find({"company_id": ObjectId(company_id)})
+    else:
+        accounts_cursor = db.gmail_accounts.find({"company_id": ObjectId(company_id)})
+
     accounts = []
     async for account in accounts_cursor:
         owner = await db.users.find_one({"_id": account["user_id"]})
