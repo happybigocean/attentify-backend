@@ -215,6 +215,7 @@ async def active_members(
 
     members_cursor = db["memberships"].find({
         "company_id": ObjectId(company_id),
+        "role": "agent",
         "status": "active"
     })
 
