@@ -166,6 +166,7 @@ async def get_company_messages(
         # Cleanup unused fields
         doc.pop("assigned_member_id", None)
         doc.pop("messages", None)
+        doc.pop("comments", None)  # Remove comments for list view
 
         messages.append(doc)
 
@@ -180,12 +181,61 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
     if not doc:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
+    # Convert ObjectIds → strings
+    doc["_id"] = str(doc["_id"])
     doc["user_id"] = str(doc["user_id"])
     doc["company_id"] = str(doc["company_id"])
     if "assigned_member_id" in doc and doc["assigned_member_id"]:
         doc["assigned_member_id"] = str(doc["assigned_member_id"])
+
+    # Properly await comment serialization
+    comments = []
+    for c in doc.get("comments", []):
+        comments.append(await serialize_comment(c, db))
+    doc["comments"] = comments
+
     return doc
+
+async def serialize_comment(comment: dict, db) -> dict:
+    user = await db["users"].find_one({"_id": comment["user_id"]})
+    return {
+        "id": str(comment["_id"]),
+        "user_id": str(comment["user_id"]),  # keep raw user reference
+        "user": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() if user else None,
+        "content": comment["content"],
+        "created_at": comment["created_at"].isoformat() if comment.get("created_at") else None,
+        "updated_at": comment["updated_at"].isoformat() if comment.get("updated_at") else None,
+    }
+
+@router.post("/add_comment/{message_id}", response_model=dict)
+async def add_comment(
+    message_id: str,
+    content: str = Body(..., embed=True),
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    if not ObjectId.is_valid(message_id):
+        raise HTTPException(status_code=400, detail="Invalid message ID")
+
+    # Build new comment object
+    new_comment = {
+        "_id": ObjectId(),  # unique ID for comment
+        "user_id": ObjectId(user["_id"]),
+        "content": content,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    }
+
+    # Push comment into the message's comments array
+    result = await db["messages"].update_one(
+        {"_id": ObjectId(message_id)},
+        {"$push": {"comments": new_comment}}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    return {"message": "Comment added", "comment": serialize_comment(new_comment)}
 
 @router.patch("/{message_id}")
 async def update_message_field(

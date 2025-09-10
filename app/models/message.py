@@ -14,6 +14,17 @@ class ChatEntry(BaseModel):
     message_type: Optional[Literal["text", "html", "file", "voice", "system"]] = "text"
     metadata: Optional[Dict[str, Any]] = {}
 
+class Comment(BaseModel):
+    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    user_id: PyObjectId = Field(..., description="ID of the user who wrote the comment")
+    content: str = Field(..., description="Comment text")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        allow_population_by_field_name = True
+        json_encoders = {ObjectId: str}
+
 class Message(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     user_id: PyObjectId = Field(...)
@@ -43,6 +54,8 @@ class Message(BaseModel):
 
     assigned_member_id: Optional[PyObjectId] = None  # ID of the team member assigned to this message
 
+    comments: List[Comment] = []  # Comments on the message thread
+    
     class Config:
         allow_population_by_field_name = True
         json_encoders = {ObjectId: str}
