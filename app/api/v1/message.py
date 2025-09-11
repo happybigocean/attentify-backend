@@ -235,7 +235,7 @@ async def add_comment(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    return {"message": "Comment added", "comment": serialize_comment(new_comment)}
+    return {"message": "Comment added", "comment": await serialize_comment(new_comment, db)}
 
 @router.patch("/{message_id}")
 async def update_message_field(
