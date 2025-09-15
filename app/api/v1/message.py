@@ -200,11 +200,12 @@ async def serialize_comment(comment: dict, db) -> dict:
     user = await db["users"].find_one({"_id": comment["user_id"]})
     return {
         "id": str(comment["_id"]),
-        "user_id": str(comment["user_id"]),  # keep raw user reference
+        "user_id": str(comment["user_id"]),  # raw user reference
         "user": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() if user else None,
         "content": comment["content"],
-        "created_at": comment["created_at"].isoformat() if comment.get("created_at") else None,
-        "updated_at": comment["updated_at"].isoformat() if comment.get("updated_at") else None,
+        "resolution": comment.get("resolution"),
+        "created_at": comment["created_at"].strftime("%Y-%m-%d %H:%M:%S") if comment.get("created_at") else None,
+        "updated_at": comment["updated_at"].strftime("%Y-%m-%d %H:%M:%S") if comment.get("updated_at") else None,
     }
 
 @router.post("/add_comment/{message_id}", response_model=dict)
@@ -236,6 +237,58 @@ async def add_comment(
         raise HTTPException(status_code=404, detail="Message not found")
 
     return {"message": "Comment added", "comment": await serialize_comment(new_comment, db)}
+
+@router.put("/edit_comment/{message_id}/{comment_id}", response_model=dict)
+async def edit_comment(
+    message_id: str,
+    comment_id: str,
+    content: str = Body(..., embed=True),
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    if not (ObjectId.is_valid(message_id) and ObjectId.is_valid(comment_id)):
+        raise HTTPException(status_code=400, detail="Invalid IDs")
+    print(content)
+    # Find and update comment inside array
+    result = await db["messages"].update_one(
+        {"_id": ObjectId(message_id), "comments._id": ObjectId(comment_id)},
+        {
+            "$set": {
+                "comments.$.content": content,
+                "comments.$.updated_at": datetime.utcnow()
+            }
+        }
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Comment not found or not authorized")
+
+    # Get updated comment
+    message = await db["messages"].find_one({"_id": ObjectId(message_id)})
+    updated_comment = next((c for c in message["comments"] if c["_id"] == ObjectId(comment_id)), None)
+
+    return {"message": "Comment updated", "comment": await serialize_comment(updated_comment, db)}
+
+# --- Delete Comment ---
+@router.delete("/delete_comment/{message_id}/{comment_id}", response_model=dict)
+async def delete_comment(
+    message_id: str,
+    comment_id: str,
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    if not (ObjectId.is_valid(message_id) and ObjectId.is_valid(comment_id)):
+        raise HTTPException(status_code=400, detail="Invalid IDs")
+
+    result = await db["messages"].update_one(
+        {"_id": ObjectId(message_id)},
+        {"$pull": {"comments": {"_id": ObjectId(comment_id)}}}
+    )
+
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Comment not found or not authorized")
+
+    return {"message": "Comment deleted"}
 
 @router.patch("/{message_id}")
 async def update_message_field(
