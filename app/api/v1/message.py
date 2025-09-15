@@ -211,12 +211,15 @@ async def serialize_comment(comment: dict, db) -> dict:
 @router.post("/add_comment/{message_id}", response_model=dict)
 async def add_comment(
     message_id: str,
-    content: str = Body(..., embed=True),
+    payload: dict = Body(...),  # expects {"content": "...", "resolution": true/false}
     user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_database)
 ):
     if not ObjectId.is_valid(message_id):
         raise HTTPException(status_code=400, detail="Invalid message ID")
+
+    content = payload.get("content")
+    resolution = payload.get("resolution", False)
 
     # Build new comment object
     new_comment = {
@@ -225,6 +228,7 @@ async def add_comment(
         "content": content,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
+        "resolution": resolution
     }
 
     # Push comment into the message's comments array

@@ -20,6 +20,7 @@ class Comment(BaseModel):
     content: str = Field(..., description="Comment text")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
+    is_resolution: bool = Field(default=False)
 
     class Config:
         allow_population_by_field_name = True
