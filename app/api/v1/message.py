@@ -203,7 +203,7 @@ async def serialize_comment(comment: dict, db) -> dict:
         "user_id": str(comment["user_id"]),  # raw user reference
         "user": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() if user else None,
         "content": comment["content"],
-        "resolution": comment.get("resolution"),
+        "status": comment.get("status"),
         "created_at": comment["created_at"].strftime("%Y-%m-%d %H:%M:%S") if comment.get("created_at") else None,
         "updated_at": comment["updated_at"].strftime("%Y-%m-%d %H:%M:%S") if comment.get("updated_at") else None,
     }
@@ -211,7 +211,7 @@ async def serialize_comment(comment: dict, db) -> dict:
 @router.post("/add_comment/{message_id}", response_model=dict)
 async def add_comment(
     message_id: str,
-    payload: dict = Body(...),  # expects {"content": "...", "resolution": true/false}
+    payload: dict = Body(...),
     user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_database)
 ):
@@ -219,7 +219,7 @@ async def add_comment(
         raise HTTPException(status_code=400, detail="Invalid message ID")
 
     content = payload.get("content")
-    resolution = payload.get("resolution", False)
+    status = payload.get("status", "Pending")
 
     # Build new comment object
     new_comment = {
@@ -228,7 +228,7 @@ async def add_comment(
         "content": content,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
-        "resolution": resolution
+        "status": status
     }
 
     # Push comment into the message's comments array
@@ -252,7 +252,7 @@ async def edit_comment(
 ):
     if not (ObjectId.is_valid(message_id) and ObjectId.is_valid(comment_id)):
         raise HTTPException(status_code=400, detail="Invalid IDs")
-    print(content)
+    
     # Find and update comment inside array
     result = await db["messages"].update_one(
         {"_id": ObjectId(message_id), "comments._id": ObjectId(comment_id)},
@@ -272,6 +272,37 @@ async def edit_comment(
     updated_comment = next((c for c in message["comments"] if c["_id"] == ObjectId(comment_id)), None)
 
     return {"message": "Comment updated", "comment": await serialize_comment(updated_comment, db)}
+
+@router.put("/approve_comment/{message_id}/{comment_id}", response_model=dict)
+async def approve_comment(
+    message_id: str,
+    comment_id: str,
+    status: str = Body(..., embed=True),
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    if not (ObjectId.is_valid(message_id) and ObjectId.is_valid(comment_id)):
+        raise HTTPException(status_code=400, detail="Invalid IDs")
+    
+    # Find and update comment inside array
+    result = await db["messages"].update_one(
+        {"_id": ObjectId(message_id), "comments._id": ObjectId(comment_id)},
+        {
+            "$set": {
+                "comments.$.status": status,
+                "comments.$.updated_at": datetime.utcnow()
+            }
+        }
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Comment not found or not authorized")
+
+    # Get updated comment
+    message = await db["messages"].find_one({"_id": ObjectId(message_id)})
+    updated_comment = next((c for c in message["comments"] if c["_id"] == ObjectId(comment_id)), None)
+
+    return {"message": "Comment approved", "comment": await serialize_comment(updated_comment, db)}
 
 # --- Delete Comment ---
 @router.delete("/delete_comment/{message_id}/{comment_id}", response_model=dict)
