@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     PUBSUB_PROJECT: str
     PUBSUB_SUBSCRIPTION: str
     SERVICE_ACCOUNT_JSON: str
+    GOOGLE_CLIENT_ID: set
+    GOOGLE_CLIENT_SECRET: set
 
     class Config:
         env_file = ".env"

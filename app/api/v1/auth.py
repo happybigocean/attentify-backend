@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime
 from app.models.user import UserCreate
@@ -6,10 +7,62 @@ from app.core.security import verify_password, get_password_hash, create_access_
 from app.db.mongodb import get_database
 from app.utils.token_utils import verify_invitation_token
 from bson import ObjectId
+from authlib.integrations.starlette_client import OAuth
+import os
+from db import get_database
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from jose import JWTError, jwt
 
 router = APIRouter()
 
 VALID_ROLES = {"admin", "store_owner", "agent", "readonly"}
+
+# --- OAuth Setup --
+oauth = OAuth()
+oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
+
+@router.get("/auth/google/login")
+async def google_login(request: Request):
+    redirect_uri = request.url_for("google_callback")
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+@router.get("/auth/google/callback")
+async def google_callback(request: Request, db: AsyncIOMotorDatabase = Depends(get_database)):
+    token = await oauth.google.authorize_access_token(request)
+    user_info = token.get("userinfo")
+
+    if not user_info:
+        raise HTTPException(status_code=400, detail="Google login failed")
+
+    email = user_info["email"]
+    name = user_info.get("name", "")
+
+    # --- Upsert user ---
+    user = db["users"].find_one({"email": email})
+    if not user:
+        user = {
+            "email": email,
+            "name": name,
+            "auth_provider": "google",
+        }
+        db["users"].insert_one(user)
+
+    # --- Issue JWT ---
+    payload = {"sub": str(user["_id"]), "email": email}
+    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+    # Redirect back to React app with token
+    redirect_url = f"http://localhost:3000/oauth/callback?token={token}"
+    return RedirectResponse(url=redirect_url)
+
+SECRET_KEY = os.getenv("JWT_SECRET", "supersecret")
+ALGORITHM = "HS256"
 
 # /api/v1/auth/register
 @router.post("/register")
