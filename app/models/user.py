@@ -11,6 +11,7 @@ class UserBase(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
+    auth_provider: Optional[str]
 
 class UserCreate(UserBase):
     password: str

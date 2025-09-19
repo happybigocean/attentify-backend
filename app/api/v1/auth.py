@@ -48,24 +48,123 @@ async def google_callback(request: Request, db: AsyncIOMotorDatabase = Depends(g
         raise HTTPException(status_code=400, detail="Google login failed")
 
     email = user_info["email"]
-    name = user_info.get("name", "")
+    first_name = user_info.get("given_name", "")
+    last_name = user_info.get("family_name", "")
 
-    # --- Upsert user ---
     user = await db["users"].find_one({"email": email})
+    
+    # If user doesn't exist, sign up
     if not user:
-        user = {
+        now = datetime.utcnow()
+
+        user_doc = {
             "email": email,
-            "name": name,
+            "first_name": first_name,
+            "last_name": last_name,
+            "created_at": now, 
+            "updated_at": now,
+            "last_login": now,
             "auth_provider": "google",
         }
-        db["users"].insert_one(user)
 
-    # --- Issue JWT ---
-    payload = {"sub": str(user["_id"]), "email": email}
-    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+        result = await db.users.insert_one(user_doc)
+        user_id = str(result.inserted_id)
+
+        # In invitation token is provided, handle it
+        # if user.invitation token:
+
+        # No token, check pending invitation
+        invitation_result = await db.invitations.find_one({
+            "email": email,
+            "status": "pending"
+        })
+
+        redirect_url = "/register-company"
+        if invitation_result:
+            redirect_url = "/ask-accept-invitation"
+
+        token = create_access_token({
+            "sub": user_id, 
+            "user_id": user_id,
+            "name": f"{first_name} {last_name}".strip(),
+            "email": email,
+            "redirect_url": redirect_url
+        })
+
+        redirect_url = f"{FRONTEND_URL}/oauth/callback/register?token={token}"
+        return RedirectResponse(url=redirect_url)
+
+    # If user exists, sign in
+    await db["users"].update_one(
+        {"email": user["email"]},
+        {"$set": {"last_login": datetime.utcnow()}}
+    )
+
+    user_id = str(user["_id"])
+
+    if user.get("role") == "admin":
+        token = create_access_token(data={
+            "sub": user_id,
+            "user_id": user_id,
+            "name":  f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+            "email": user["email"],
+            "role": "admin"
+        })
+
+        return {
+            "token": token,
+            "user": {
+                "id": user_id,  
+                "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+                "email": user["email"],
+                "role": "admin"
+            }
+        }
     
-    # Redirect back to React app with token
-    redirect_url = f"{FRONTEND_URL}/oauth/callback?token={token}"
+    memberships_cursor = db.memberships.find({
+        "user_id": user["_id"],
+        "status": "active"
+    }).sort("last_used_at", -1)
+
+    memberships = await memberships_cursor.to_list(length=None)
+
+    if not memberships:
+        raise HTTPException(status_code=403, detail="No active company membership found")
+    
+    selected_membership = memberships[0]
+    company_id = selected_membership["company_id"]
+    role = selected_membership.get("role", "readonly")
+
+    await db.memberships.update_one(
+        {"_id": selected_membership["_id"]},
+        {"$set": {"last_used_at": datetime.utcnow()}}
+    )
+
+    company_ids = [m["company_id"] for m in memberships]
+    companies_cursor = db.companies.find({"_id": {"$in": company_ids}})
+    companies_map = {str(c["_id"]): c async for c in companies_cursor}
+
+    company_list = []
+    for m in memberships:
+        cid = str(m["company_id"])
+        company = companies_map.get(cid)
+        if company:
+            company_list.append({
+                "id": cid,
+                "name": company.get("name", "")
+            })
+
+    token = create_access_token(data={
+        "sub": user_id,
+        "user_id": user_id,
+        "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+        "email": user["email"],
+        "company_id": str(company_id),
+        "role": role,
+        "companies": company_list
+    })
+
+    redirect_url = f"{FRONTEND_URL}/oauth/callback/login?token={token}"
     return RedirectResponse(url=redirect_url)
 
 # /api/v1/auth/register
@@ -116,13 +215,6 @@ async def register(user: UserCreate, db=Depends(get_database)):
                 {"$set": {"status": "accepted"}}
             )
 
-            token = create_access_token(data={
-                "sub": user.email,
-                "user_id": user_id,
-                "company_id": str(company_id),
-                "role": role
-            })
-
             company = await db.companies.find_one({"_id": ObjectId(company_id)})
 
             company_list = []
@@ -131,6 +223,17 @@ async def register(user: UserCreate, db=Depends(get_database)):
                     "id": str(company["_id"]),
                     "name": company.get("name", "")
                 })
+
+            token = create_access_token(data={
+                "sub": user_id,
+                "user_id": user_id,
+                "name": f"{user.first_name} {user.last_name}".strip(),
+                "email": user.email,
+                "company_id": str(company_id),
+                "role": role,
+                "companies": company_list,
+                "redirect_url": "/dashboard"
+            })
 
             return {
                 "token": token,
@@ -158,7 +261,13 @@ async def register(user: UserCreate, db=Depends(get_database)):
     if invitation_result:
         redirect_url = "/ask-accept-invitation"
 
-    token = create_access_token({"sub": user.email, "user_id": user_id})
+    token = create_access_token({
+        "sub": user_id, 
+        "user_id": user_id,
+        "name": f"{user.first_name} {user.last_name}".strip(),
+        "email": user.email,
+        "redirect_url": redirect_url
+    })
 
     return {
         "token": token,
@@ -189,7 +298,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
     user_id = str(user["_id"])  # Convert ObjectId to string
 
     if user.get("role") == "admin":
-        user_id = user_id
         token = create_access_token(data={
             "sub": user_id,
             "user_id": user_id,
