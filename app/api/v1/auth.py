@@ -63,7 +63,7 @@ async def google_callback(request: Request, db: AsyncIOMotorDatabase = Depends(g
     # --- Issue JWT ---
     payload = {"sub": str(user["_id"]), "email": email}
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-
+    
     # Redirect back to React app with token
     redirect_url = f"{FRONTEND_URL}/oauth/callback?token={token}"
     return RedirectResponse(url=redirect_url)
@@ -191,8 +191,10 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
     if user.get("role") == "admin":
         user_id = user_id
         token = create_access_token(data={
-            "sub": user["email"],
+            "sub": user_id,
             "user_id": user_id,
+            "name":  f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+            "email": user["email"],
             "role": "admin"
         })
 
@@ -241,20 +243,15 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
             })
     
     token = create_access_token(data={
-        "sub": user["email"],
+        "sub": user_id,
         "user_id": user_id,
+        "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+        "email": user["email"],
         "company_id": str(company_id),
-        "role": role
+        "role": role,
+        "companies": company_list
     })
 
     return {
         "token": token,
-        "user": {
-            "id": user_id,  
-            "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
-            "email": user["email"],
-            "company_id": str(company_id),
-            "role": role,
-            "companies": company_list
-        }
     }
