@@ -9,13 +9,17 @@ from app.utils.token_utils import verify_invitation_token
 from bson import ObjectId
 from authlib.integrations.starlette_client import OAuth
 import os
-from db import get_database
+from app.db.mongodb import get_database
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from jose import JWTError, jwt
 
 router = APIRouter()
 
 VALID_ROLES = {"admin", "store_owner", "agent", "readonly"}
+
+SECRET_KEY = os.getenv("SECRET_KEY", "supersecret")
+ALGORITHM = "HS256"
+FRONTEND_URL = os.getenv("FRONTEND_URL")
 
 # --- OAuth Setup --
 oauth = OAuth()
@@ -27,12 +31,15 @@ oauth.register(
     client_kwargs={"scope": "openid email profile"},
 )
 
-@router.get("/auth/google/login")
+# /api/v1/auth/google/login
+@router.get("/google/login")
 async def google_login(request: Request):
     redirect_uri = request.url_for("google_callback")
+    print(redirect_uri)
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
-@router.get("/auth/google/callback")
+# /api/v1/auth/google/callback
+@router.get("/google/callback")
 async def google_callback(request: Request, db: AsyncIOMotorDatabase = Depends(get_database)):
     token = await oauth.google.authorize_access_token(request)
     user_info = token.get("userinfo")
@@ -44,7 +51,7 @@ async def google_callback(request: Request, db: AsyncIOMotorDatabase = Depends(g
     name = user_info.get("name", "")
 
     # --- Upsert user ---
-    user = db["users"].find_one({"email": email})
+    user = await db["users"].find_one({"email": email})
     if not user:
         user = {
             "email": email,
@@ -58,11 +65,8 @@ async def google_callback(request: Request, db: AsyncIOMotorDatabase = Depends(g
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
     # Redirect back to React app with token
-    redirect_url = f"http://localhost:3000/oauth/callback?token={token}"
+    redirect_url = f"{FRONTEND_URL}/oauth/callback?token={token}"
     return RedirectResponse(url=redirect_url)
-
-SECRET_KEY = os.getenv("JWT_SECRET", "supersecret")
-ALGORITHM = "HS256"
 
 # /api/v1/auth/register
 @router.post("/register")
