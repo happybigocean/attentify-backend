@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.models.user import UserCreate
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.db.mongodb import get_database
@@ -12,6 +12,8 @@ import os
 from app.db.mongodb import get_database
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from jose import JWTError, jwt
+from app.utils.email_utils import send_reset_password_email
+from app.models.auth import ForgotPasswordRequest, ResetPasswordRequest
 
 router = APIRouter()
 
@@ -363,3 +365,49 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
     return {
         "token": token,
     }
+
+
+# /api/v1/auth/forgot-password
+@router.post("/forgot-password")
+async def forgot_password(
+    request: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_database)
+):
+    user = await db['users'].find_one({"email": request.email})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # create token valid for 15 minutes
+    payload = {
+        "sub": str(user["_id"]),
+        "exp": datetime.utcnow() + timedelta(minutes=15)
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+    reset_link = f"{FRONTEND_URL}/reset-password?token={token}"
+
+    # Send in background
+    background_tasks.add_task(send_reset_password_email, request.email, reset_link)
+
+    return {"message": "Reset link sent if email exists"}
+
+
+# /api/v1/auth/reset-password
+@router.post("/reset-password")
+async def reset_password(request: ResetPasswordRequest, db=Depends(get_database)):
+    try:
+        payload = jwt.decode(request.token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload["sub"]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    hashed_pw = get_password_hash(request.new_password)
+
+    # if using Motor (async Mongo)
+    await db["users"].update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"hashed_password": hashed_pw}}
+    )
+
+    return {"message": "Password reset successful"}

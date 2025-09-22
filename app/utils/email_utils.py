@@ -23,3 +23,25 @@ async def send_invitation_email(to_email: str, invite_link: str):
     )
     fm = FastMail(conf)
     await fm.send_message(message)
+
+
+async def send_reset_password_email(to_email: str, reset_link: str):
+    message = MessageSchema(
+        subject="Password Reset Request",
+        recipients=[to_email],
+        body=f"""
+        Hello,
+
+        We received a request to reset your password. 
+        Click the link below to reset it:
+
+        {reset_link}
+
+        If you did not request this, please ignore this email.
+
+        This link will expire in 15 minutes.
+        """,
+        subtype="plain"
+    )
+    fm = FastMail(conf)
+    await fm.send_message(message)
