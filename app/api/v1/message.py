@@ -204,6 +204,7 @@ async def serialize_comment(comment: dict, db) -> dict:
         "user": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() if user else None,
         "content": comment["content"],
         "status": comment.get("status"),
+        "edited": comment.get("edited"),
         "created_at": comment["created_at"].strftime("%Y-%m-%d %H:%M:%S") if comment.get("created_at") else None,
         "updated_at": comment["updated_at"].strftime("%Y-%m-%d %H:%M:%S") if comment.get("updated_at") else None,
     }
@@ -259,6 +260,7 @@ async def edit_comment(
         {
             "$set": {
                 "comments.$.content": content,
+                "comments.$.edited": True,
                 "comments.$.updated_at": datetime.utcnow()
             }
         }
