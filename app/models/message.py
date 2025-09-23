@@ -21,6 +21,7 @@ class Comment(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
     status: Literal["Pending", "Resolved", "Awaiting Approval"] = "Pending"
+    edited: Optional[bool] = False
 
     class Config:
         allow_population_by_field_name = True
