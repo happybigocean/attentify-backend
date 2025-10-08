@@ -202,6 +202,29 @@ async def list_shopify_cred(request: Request, current_user: dict = Depends(get_c
         docs.append(doc)
     return docs
 
+@router.get("/company", response_model=List[dict])
+async def list_company_shopify_cred(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    company_id: str = None  # optional query parameter
+):
+    db = request.app.state.db
+
+    if not ObjectId.is_valid(company_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company ID")
+
+
+    cursor = db.shopify_cred.find({"company_id": ObjectId(company_id)})
+    docs = []
+
+    async for doc in cursor:
+        doc['_id'] = str(doc['_id'])
+        doc['user_id'] = str(doc['user_id'])
+        doc['company_id'] = str(doc['company_id'])
+        docs.append(doc)
+
+    return docs
+
 @router.delete("/{shopify_id}")
 async def delete_shopify_cred(shopify_id: str, request: Request):
     db = request.app.state.db
