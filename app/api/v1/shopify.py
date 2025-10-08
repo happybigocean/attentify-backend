@@ -306,9 +306,11 @@ async def shopify_orders_create_webhook(
 @router.get("/orders", response_model=List[dict])
 async def get_orders(request: Request):
     db = request.app.state.db
-    # Use async for to iterate, or to_list() to get list at once
-    orders_cursor = db.orders.find({}, {"_id": 0})
-    orders = await orders_cursor.to_list(length=1000)  # or whatever max size you want
+
+    # Sort orders by created_at descending (-1)
+    orders_cursor = db.orders.find({}, {"_id": 0}).sort("created_at", -1)
+
+    orders = await orders_cursor.to_list(length=20)  # or whatever max size you want
     return orders
 
 # Endpoint: Sync orders from all stores
