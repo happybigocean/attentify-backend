@@ -198,6 +198,7 @@ async def list_shopify_cred(request: Request, current_user: dict = Depends(get_c
     async for doc in cursor:
         doc['_id'] = str(doc['_id'])
         doc['user_id'] = str(doc['user_id'])  # Convert ObjectId to string
+        doc['company_id'] = str(doc['company_id'])  # Convert ObjectId to string
         docs.append(doc)
     return docs
 
@@ -300,7 +301,7 @@ async def shopify_orders_create_webhook(
 ):
     try:
         raw_body = await request.body()
-
+        
         # --- HMAC Verification ---
         computed_hmac = base64.b64encode(
             hmac.new(
@@ -318,9 +319,24 @@ async def shopify_orders_create_webhook(
         
         data = json.loads(raw_body)
         print(f"[✓] x_shopify_shop_domain: {x_shopify_shop_domain}")
+
+        db = await get_database()
+        user_id, company_id = None, None
+
+        cred = await db.shopify_cred.find_one({"shop": x_shopify_shop_domain})
+        if not cred:
+            print(f"[!] Shopify credentials not found for shop: {x_shopify_shop_domain}")
+            user_id = None
+            company_id = None
+        else:
+            user_id = cred.get("user_id")
+            company_id = cred.get("company_id")
+
         order_document = {
             "shop": x_shopify_shop_domain,
             "order_id": data["id"],
+            "user_id": ObjectId(user_id),
+            "company_id": ObjectId(company_id),
             "order_number": data.get("order_number"),
             "name": data.get("name"),
             "created_at": data.get("created_at"),
@@ -354,7 +370,7 @@ async def shopify_orders_create_webhook(
             "updated_at": data.get("updated_at")
         }
 
-        db = await get_database()
+        
         # async Motor: must await db operations
         print(f"[✓] Inserting/updating order: {order_document['order_id']} in shop: {order_document['shop']}")
         if not await db.orders.find_one({"order_id": order_document["order_id"]}):
