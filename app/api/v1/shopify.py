@@ -411,10 +411,15 @@ async def get_orders(request: Request):
     db = request.app.state.db
 
     # Sort orders by created_at descending (-1)
-    orders_cursor = db.orders.find({}, {"_id": 0}).sort("created_at", -1)
+    cursor = db.orders.find({}).sort("created_at", -1)
+    docs = []
+    async for doc in cursor:
+        doc['_id'] = str(doc['_id'])
+        doc['user_id'] = str(doc['user_id'])  # Convert ObjectId to string
+        doc['company_id'] = str(doc['company_id'])  # Convert ObjectId to string
+        docs.append(doc)
 
-    orders = await orders_cursor.to_list(length=20)  # or whatever max size you want
-    return orders
+    return docs
 
 # Endpoint: Sync orders from all stores
 @router.post("/orders/sync")
