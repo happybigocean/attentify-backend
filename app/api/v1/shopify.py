@@ -57,7 +57,10 @@ shopify_auth_helper = ShopifyAuthHelper(SHOPIFY_API_KEY, SHOPIFY_API_SECRET)
 
 #/api/v1/shopify/auth
 @router.get("/auth")
-def shopify_auth(request: Request, user_id: str = Query(...)):
+def shopify_auth(request: Request, 
+                 user_id: str = Query(...),
+                 company_id: str = Query(...)
+                ):
     """
     Redirect user to Shopify OAuth consent page
     """
@@ -72,6 +75,7 @@ def shopify_auth(request: Request, user_id: str = Query(...)):
     #)
 
     request.session["user_id"] = user_id
+    request.session["company_id"] = company_id
     return RedirectResponse(url=SHOPIFY_INSTALL_URL)
 
 @router.get("/install")
@@ -95,7 +99,9 @@ def shopify_callback(request: Request):
     shop = params.get("shop")
     code = params.get("code")
     hmac_received = params.get("hmac")
+
     user_id = request.session.get("user_id")
+    company_id = request.session.get("company_id")
 
     if not shop or not code or not hmac_received or not user_id:
         raise HTTPException(status_code=400, detail="Missing parameters")
@@ -128,7 +134,7 @@ def shopify_callback(request: Request):
     access_token = response.json().get("access_token")
 
     # Register webhook
-    register_shopify_webhook(shop, access_token)
+    webhook_id = register_shopify_webhook(shop, access_token)
 
     db = request.app.state.db
     db.shopify_cred.update_one(
@@ -138,7 +144,9 @@ def shopify_callback(request: Request):
                 "shop": shop,  # ← add this
                 "access_token": access_token,
                 "status": "connected",
-                "user_id": ObjectId(user_id)
+                "user_id": ObjectId(user_id),
+                "company_id": ObjectId(company_id),
+                "webhook_id": webhook_id
             }
         },
         upsert=True
@@ -196,9 +204,41 @@ async def list_shopify_cred(request: Request, current_user: dict = Depends(get_c
 @router.delete("/{shopify_id}")
 async def delete_shopify_cred(shopify_id: str, request: Request):
     db = request.app.state.db
+
+    # 1️⃣ Find the credential by ID
+    cred = await db.shopify_cred.find_one({"_id": ObjectId(shopify_id)})
+    if not cred:
+        raise HTTPException(status_code=404, detail="Shopify credential not found")
+
+    webhook_id = cred.get("webhook_id")
+    shop = cred.get("shop")
+    access_token = cred.get("access_token")
+
+    # 2️⃣ If webhook_id exists, attempt to delete the webhook from Shopify
+    if webhook_id and shop and access_token:
+        webhook_url = f"https://{shop}/admin/api/2024-10/webhooks/{webhook_id}.json"
+        headers = {
+            "X-Shopify-Access-Token": access_token,
+            "Content-Type": "application/json"
+        }
+
+        try:
+            response = requests.delete(webhook_url, headers=headers)
+            if response.status_code == 200:
+                print(f"[✓] Webhook {webhook_id} deleted successfully for {shop}")
+            elif response.status_code == 404:
+                print(f"[!] Webhook {webhook_id} not found in Shopify (may already be deleted).")
+            else:
+                print(f"[!] Webhook delete failed: {response.status_code} {response.text}")
+        except requests.RequestException as e:
+            print(f"[!] Webhook delete exception: {e}")
+
+    # 3️⃣ Delete the credential document from MongoDB
     result = await db.shopify_cred.delete_one({"_id": ObjectId(shopify_id)})
+
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Shopify credential not found")
+
     return {"detail": "Deleted successfully"}
 
 # Register Shopify Webhook
@@ -215,19 +255,43 @@ def register_shopify_webhook(shop: str, access_token: str):
             "format": "json"
         }
     }
+
     try:
         response = requests.post(webhook_url, json=data, headers=headers)
     except requests.RequestException as e:
         print(f"[!] Webhook request exception: {e}")
-        return False
+        return None
 
     if response.status_code == 201:
-        print(f"[✓] Webhook registered for {shop}")
+        webhook = response.json().get("webhook", {})
+        webhook_id = webhook.get("id")
+        print(f"[✓] Webhook registered for {shop} (ID: {webhook_id})")
+        return webhook_id  # ✅ Return the ID
     else:
         print(f"[!] Webhook failed: {response.status_code} {response.text}")
+        return None
 
-    return response.status_code == 201
+# Delete Shopify Webhook
+def delete_shopify_webhook(shop: str, access_token: str, webhook_id: str):
+    webhook_url = f"https://{shop}/admin/api/2024-10/webhooks/{webhook_id}.json"
+    headers = {
+        "X-Shopify-Access-Token": access_token,
+        "Content-Type": "application/json"
+    }
 
+    try:
+        response = requests.delete(webhook_url, headers=headers)
+    except requests.RequestException as e:
+        print(f"[!] Webhook delete exception: {e}")
+        return False
+
+    if response.status_code == 200:
+        print(f"[✓] Webhook {webhook_id} deleted successfully for {shop}")
+        return True
+    else:
+        print(f"[!] Webhook delete failed: {response.status_code} {response.text}")
+        return False
+    
 @router.post("/webhook/orders_create")
 async def shopify_orders_create_webhook(
     request: Request,
