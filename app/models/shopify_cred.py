@@ -8,6 +8,7 @@ class ShopifyCredBase(BaseModel):
     access_token: str
     status: Optional[str] = "connected"
     user_id: Optional[ObjectId] = Field(default=None, alias="user_id")
+    company_id: Optional[ObjectId] = Field(default=None, alias="company_id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

@@ -1,6 +1,7 @@
 import requests
 from datetime import datetime
 from pymongo import UpdateOne
+from bson import ObjectId
 
 async def get_all_shopify_creds(db):
     """Fetch all Shopify store credentials from the database."""
@@ -60,10 +61,24 @@ async def fetch_orders_from_shop(shop, access_token):
 
 async def upsert_orders(db, shop, orders):
     """Insert or update orders in the database for a specific shop."""
+
+    user_id, company_id = None, None
+
+    cred = await db.shopify_cred.find_one({"shop": shop})
+    if not cred:
+        print(f"[!] Shopify credentials not found for shop: {shop}")
+        user_id = None
+        company_id = None
+    else:
+        user_id = cred.get("user_id")
+        company_id = cred.get("company_id")
+
     bulk_ops = []
     for order in orders:
         doc = {
             "order_id": order["id"],
+            "user_id": ObjectId(user_id),
+            "company_id": ObjectId(company_id),
             "order_number": order.get("order_number"),
             "name": order.get("name"),
             "shop": shop,
