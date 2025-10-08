@@ -13,6 +13,7 @@ from app.services.shopify_service import (
     upsert_orders,
 )
 
+from math import ceil
 from app.db.mongodb import get_database
 from app.core.security import get_current_user
 
@@ -406,20 +407,46 @@ async def shopify_orders_create_webhook(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Webhook processing failed: {str(e)}")
     
 # Endpoint: Get all orders (for all stores)
-@router.get("/orders", response_model=List[dict])
-async def get_orders(request: Request):
+@router.get("/orders")
+async def get_orders(
+    request: Request,
+    search: str = Query("", description="Search by order name or customer email"),
+    shop: str = Query("", description="Filter by shop"),
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(10, ge=1, le=100, description="Page size"),
+    company_id: str = Query("", description="Company ID")
+):
     db = request.app.state.db
 
-    # Sort orders by created_at descending (-1)
-    cursor = db.orders.find({}).sort("created_at", -1)
-    docs = []
+    # Build filter query
+    filter_query = {}
+    if search:
+        filter_query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"customer.email": {"$regex": search, "$options": "i"}}
+        ]
+    if shop:
+        filter_query["shop"] = shop
+    if company_id:
+        filter_query["company_id"] = ObjectId(company_id)
+
+    # Count total documents for pagination
+    total_count = await db.orders.count_documents(filter_query)
+    totalPages = ceil(total_count / size)
+
+    # Fetch paginated orders sorted by created_at descending
+    cursor = db.orders.find(filter_query).sort("created_at", -1).skip((page - 1) * size).limit(size)
+    orders = []
     async for doc in cursor:
         doc['_id'] = str(doc['_id'])
-        doc['user_id'] = str(doc['user_id'])  # Convert ObjectId to string
-        doc['company_id'] = str(doc['company_id'])  # Convert ObjectId to string
-        docs.append(doc)
+        doc['user_id'] = str(doc['user_id'])
+        doc['company_id'] = str(doc['company_id'])
+        orders.append(doc)
 
-    return docs
+    return {
+        "orders": orders,
+        "totalPages": totalPages
+    }
 
 # Endpoint: Sync orders from all stores
 @router.post("/orders/sync")
