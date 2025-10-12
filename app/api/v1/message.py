@@ -19,6 +19,8 @@ from email.utils import parseaddr
 from pymongo import DESCENDING
 from app.core.security import get_current_user
 
+from math import ceil
+
 router = APIRouter()
 
 @router.post("/fetch-all")
@@ -106,16 +108,19 @@ async def get_messages(db=Depends(get_database), current_user: dict = Depends(ge
         messages.append(doc)
     return messages
 
-@router.get("/company_messages", response_model=List[dict])
+@router.get("/company_messages", response_model=dict)
 async def get_company_messages(
     company_id: str = Query(..., description="ID of the company"),
+    search: str = Query("", description="Search by message title or client name/email"),
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(10, ge=1, le=100, description="Page size"),
     db: AsyncIOMotorDatabase = Depends(get_database),
     current_user: dict = Depends(get_current_user)
 ):
     if not ObjectId.is_valid(company_id):
         raise HTTPException(status_code=400, detail="Invalid company ID")
 
-    # ✅ await find_one
+    # ✅ Verify membership
     membership = await db["memberships"].find_one(
         {"user_id": current_user["_id"], "company_id": ObjectId(company_id)}
     )
@@ -123,16 +128,38 @@ async def get_company_messages(
         raise HTTPException(status_code=403, detail="User is not a member of this company")
 
     role = membership.get("role")
-    cursor = None
 
-    if role == "company_owner":
-        cursor = db["messages"].find({"company_id": ObjectId(company_id)}).sort("last_updated", DESCENDING)
-    elif role == "store_owner":
-        cursor = db["messages"].find({"user_id": current_user["_id"]}).sort("last_updated", DESCENDING)
+    # ✅ Base query depending on role
+    query = {"company_id": ObjectId(company_id)}
+    if role == "store_owner":
+        query["user_id"] = current_user["_id"]
     elif role == "agent":
-        cursor = db["messages"].find({"assigned_member_id": current_user["_id"]}).sort("last_updated", DESCENDING)
-    else:
-        cursor = db["messages"].find({"user_id": current_user["_id"]}).sort("last_updated", DESCENDING)
+        query["assigned_member_id"] = current_user["_id"]
+    elif role not in ["company_owner", "store_owner", "agent"]:
+        query["user_id"] = current_user["_id"]
+
+    # ✅ Apply search filter (case-insensitive)
+    if search.strip():
+        search_regex = {"$regex": search.strip(), "$options": "i"}
+        query["$or"] = [
+            {"title": search_regex},
+            {"client": search_regex},
+        ]
+
+    # Count total documents for pagination
+    total_count = await db["messages"].count_documents(query)
+    totalPages = ceil(total_count / size)
+
+    # ✅ Pagination
+    skip = (page - 1) * size
+
+    cursor = (
+        db["messages"]
+        .find(query)
+        .sort("last_updated", DESCENDING)
+        .skip(skip)
+        .limit(size)
+    )
 
     messages = []
     async for doc in cursor:
@@ -140,22 +167,21 @@ async def get_company_messages(
         doc["user_id"] = str(doc["user_id"])
         doc["company_id"] = str(doc["company_id"])
 
-        # Clean client name
+        # ✅ Clean client name
         raw_client = doc.get("client", "")
         doc["client"] = extract_name(raw_client)
 
-        # Assigned member
-        member = None
+        # ✅ Get assigned member details
         assigned_member_id = doc.get("assigned_member_id")
+        member = None
         if assigned_member_id:
             try:
                 member_obj = await db["users"].find_one(
                     {"_id": assigned_member_id if isinstance(assigned_member_id, ObjectId) else ObjectId(assigned_member_id)}
                 )
                 if member_obj:
-                    member_obj["_id"] = str(member_obj["_id"])
                     member = {
-                        "id": member_obj["_id"],
+                        "id": str(member_obj["_id"]),
                         "name": f"{member_obj.get('first_name', '')} {member_obj.get('last_name', '')}".strip(),
                         "email": member_obj.get("email", "")
                     }
@@ -163,14 +189,17 @@ async def get_company_messages(
                 member = None
         doc["assigned_to"] = member
 
-        # Cleanup unused fields
+        # ✅ Cleanup unused fields
         doc.pop("assigned_member_id", None)
         doc.pop("messages", None)
-        doc.pop("comments", None)  # Remove comments for list view
+        doc.pop("comments", None)
 
         messages.append(doc)
 
-    return messages
+    return {
+        "messages": messages,
+        "totalPages": totalPages
+    }
 
 @router.get("/{id}", response_model=dict)
 async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database)):
