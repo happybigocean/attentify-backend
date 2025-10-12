@@ -447,6 +447,8 @@ async def analyze_email_message(
     db_order = await db["orders"].find_one({"name": order_name})
     if db_order:
         db_order["_id"] = str(db_order["_id"])
+        db_order["user_id"] = str(db_order.get("user_id", ""))
+        db_order["company_id"] = str(db_order.get("company_id", ""))
         order_info["shopify_order"] = db_order
     else:
         order_info["msg"] = "Order not found"
