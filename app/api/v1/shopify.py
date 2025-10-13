@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException, Header, status, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, Request, HTTPException, Header, status, BackgroundTasks, Depends, Query, Body
 from fastapi.responses import RedirectResponse, JSONResponse
 from urllib.parse import urlencode
 import hmac, hashlib, requests, base64
@@ -16,6 +16,7 @@ from app.services.shopify_service import (
 from math import ceil
 from app.db.mongodb import get_database
 from app.core.security import get_current_user
+import httpx
 
 router = APIRouter()
 
@@ -468,3 +469,144 @@ async def sync_all_stores_orders():
             await upsert_orders(db, shop, orders)
         except Exception as e:
             print(f"Error syncing {shop}: {e}")
+
+# /shopify/order/refund
+@router.post("/order/refund")
+async def refund_order(payload: dict = Body(...)):
+    db = await get_database()
+
+    order_id = payload.get("order_id")
+    shop = payload.get("shop")
+
+    if not order_id or not shop:
+        return JSONResponse(status_code=400, content={"error": "Missing order_id or shop"})
+
+    # Get access token from shopify_cred collection
+    shopify_cred = await db["shopify_cred"].find_one({"shop": shop})
+    if not shopify_cred:
+        return JSONResponse(status_code=404, content={"error": "Shop credentials not found"})
+
+    access_token = shopify_cred.get("access_token")
+
+    # Get order info
+    order = await db["orders"].find_one({"order_id": int(order_id)})
+    if not order:
+        return JSONResponse(status_code=404, content={"error": "Order not found"})
+
+    # Build refund payload (simple example)
+    refund_payload = {
+        "refund": {
+            "note": "Full refund issued via API",
+            "shipping": {"full_refund": True},
+            "refund_line_items": [
+                {
+                    "line_item_id": order["line_items"][0]["product_id"],
+                    "quantity": order["line_items"][0]["quantity"],
+                }
+            ],
+        }
+    }
+
+    url = f"https://{shop}/admin/api/2024-10/orders/{order_id}/refunds.json"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            url,
+            headers={"X-Shopify-Access-Token": access_token, "Content-Type": "application/json"},
+            json=refund_payload,
+        )
+
+        # 🟨 Print debug info — status and text
+        print("Shopify Refund Response Status:", response.status_code)
+        print("Shopify Refund Response Body:", response.text)
+
+        if response.status_code >= 400:
+            # Try to return the message from Shopify
+            try:
+                data = response.json()
+            except Exception:
+                data = {"error": response.text}
+            return JSONResponse(status_code=response.status_code, content=data)
+
+        return {"msg": "Refund processed successfully", "shopify_response": response.json()}
+    
+@router.post("/order/cancel")
+async def cancel_order(payload: dict = Body(...)):
+    db = await get_database()
+
+    # --- Step 1: Validate input ---
+    order_id = payload.get("order_id")
+    shop = payload.get("shop")
+
+    if not order_id or not shop:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Missing order_id or shop"},
+        )
+
+    # --- Step 2: Get Shopify credentials ---
+    shopify_cred = await db.shopify_cred.find_one({"shop": shop})
+    if not shopify_cred or "access_token" not in shopify_cred:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Shop credentials not found for shop: {shop}"},
+        )
+
+    access_token = shopify_cred["access_token"]
+    headers = {"X-Shopify-Access-Token": access_token, "Content-Type": "application/json"}
+
+    # --- Step 3: Get order info from DB ---
+    order_doc = await db.orders.find_one({"order_id": int(order_id)})
+    if not order_doc:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Order {order_id} not found in database."},
+        )
+
+    # --- Step 4: Check if order is already cancelled ---
+    if order_doc.get("cancelled_at"):
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Order {order_id} is already cancelled."},
+        )
+
+    # --- Step 5: Call Shopify Cancel API ---
+    cancel_url = f"https://{shop}/admin/api/2024-10/orders/{int(order_id)}/cancel.json"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(cancel_url, headers=headers)
+        except Exception as e:
+            return JSONResponse(
+                status_code=500,
+                content={"error": f"Failed to reach Shopify API: {str(e)}"},
+            )
+
+    # --- Step 6: Handle Shopify response ---
+    if response.status_code == 200:
+        data = response.json()
+
+        # Optionally update local DB to mark as cancelled
+        await db.orders.update_one(
+            {"order_id": int(order_id)},
+            {"$set": {"fulfillment_status": "cancelled", "cancelled_at": True}},
+        )
+
+        return {
+            "msg": f"Order {order_id} cancelled successfully.",
+            "shopify_response": data,
+        }
+
+    # --- Step 7: Shopify error ---
+    try:
+        error_data = response.json()
+    except Exception:
+        error_data = {"error": response.text}
+
+    return JSONResponse(
+        status_code=response.status_code,
+        content={
+            "error": "Failed to cancel order in Shopify.",
+            "details": error_data,
+        },
+    )
