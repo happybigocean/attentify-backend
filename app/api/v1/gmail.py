@@ -386,7 +386,13 @@ async def google_oauth_callback(
             subscriber.get_subscription(request={"subscription": subscription_path})
         except Exception:
             subscriber.create_subscription(
-                request={"name": subscription_path, "topic": topic_path}
+                request={
+                    "name": subscription_path, 
+                    "topic": topic_path,
+                    "push_config": {
+                        "push_endpoint": f"{settings.BACKEND_URL}/api/v1/gmail/pubsub/push"
+                    }
+                }
             )
         return subscription_path
 

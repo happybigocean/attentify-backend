@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     MAIL_FROM_NAME: str = "Attentify"
     SECRET_KEY: str 
     FRONTEND_URL: str = "http://localhost:5173"
+    BACKEND_URL: str = ""
     PUBSUB_TOPIC: str
     PUBSUB_PROJECT: str
     PUBSUB_SUBSCRIPTION: str
