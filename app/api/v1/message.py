@@ -388,6 +388,27 @@ async def update_message_field(
         raise HTTPException(status_code=404, detail="Message not found")
     return {"message": f"{field} updated"}
 
+def clean_json_response(response: str):
+    """
+    Cleans a model-generated JSON response by removing code fences and extra text.
+    Returns a parsed Python dict.
+    """
+    if not response:
+        return {}
+
+    # Remove common Markdown code fences like ```json ... ```
+    cleaned = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", response.strip())
+
+    # Extract JSON object if surrounded by text accidentally
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if match:
+        cleaned = match.group(0)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON response: {e}\nRaw text: {response}")
+    
 @router.post("/analyze_as_list", response_model=list)
 async def analyze_email_message_as_list(
     body: dict = Body(...),
@@ -440,7 +461,7 @@ async def analyze_email_message(
     result = await analyze_emails_with_ai(doc)
     # result is now a single dict, not a list
     
-    order_info = json.loads(result["response"])
+    order_info = clean_json_response(result["response"])
     order_id = str(order_info.get("order_id", ""))
     order_name = order_id if order_id.startswith("#") else "#" + order_id
 
