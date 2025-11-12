@@ -1,22 +1,29 @@
 import os
-from langchain_anthropic import ChatAnthropic
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
 from typing import List, Dict, Any
 import base64
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
+#ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    temperature=0,
+    max_tokens=None,
+    timeout=None,
+    max_retries=2,
+    # other params...
+)
 
 EMAIL_ANALYSIS_PROMPT = (
     "The following text is an order, cancellation, or refund email encoded in Base64 from a Shopify customer. "
     "Please check if the order_id field exists and is correct. "
-    "If the email is correct, output the necessary string formatted as JSON. "
-    "The JSON string should include order_id, type (either cancel or refund), status (1 if correct, otherwise 0), and msg. "
+    "If the email is correct, output ONLY a valid JSON object (no markdown, no backticks, no explanations). "
+    "The JSON must include these fields: order_id, type (either 'cancel' or 'refund'), status (1 if correct, otherwise 0), and msg. "
     "If the email is incorrect, msg should be a message requesting the order ID. "
-    "If the email is correct, msg should be a reply message to the customer, such as: "
+    "If the email is correct, msg should be a reply message to the customer, such as "
     "'Your order has been canceled.' or 'Your refund has been processed.' or another appropriate reply. "
-    "I need only the JSON output:\n\n"
+    "Output nothing except the JSON object itself.\n\n"
     "{email_contents}"
 )
 
@@ -80,7 +87,6 @@ async def analyze_emails_with_ai(message: Dict[str, Any]):
             return {"error": f"Failed to format prompt: {prompt_exc}"}
 
         try:
-            # Call the LLM synchronously (langchain-anthropic currently does not support async)
             result = llm.invoke(prompt)
         except Exception as llm_exc:
             return {"error": f"LLM invocation failed: {llm_exc}"}
