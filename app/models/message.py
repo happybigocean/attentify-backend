@@ -33,6 +33,7 @@ class Message(BaseModel):
     company_id: PyObjectId = Field(...)
     # Conversation/thread grouping key, e.g., Gmail threadId, SMS conversation ID, chat session ID
     thread_id: Optional[str] = None
+    ticket: Optional[str] = None
 
     # Participants
     participants: List[str] = []  # All unique senders/recipients in the thread

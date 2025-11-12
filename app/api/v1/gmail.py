@@ -29,6 +29,7 @@ from app.models.gmail import (
 from app.models.message import Message, ChatEntry 
 from app.utils.logger import logger
 from app.main import sio
+import re
 
 router = APIRouter()
 
@@ -592,6 +593,20 @@ async def pubsub_push(request: Request, db=Depends(get_database)):
                         }
                     )
                 else:
+
+                    shopify_order_match = re.search(r"#([A-Z]{2}\d+)", subject or content or "")
+                    shopify_order = shopify_order_match.group(1) if shopify_order_match else None
+                    
+                    # Generate new ticket number
+                    today = datetime.utcnow().strftime("%Y-%m-%d")
+                    count_today = await db["messages"].count_documents({
+                        "company_id": ObjectId(company_id),
+                        "started_at": {"$gte": datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)}
+                    })
+                    ticket_number = f"CA-{today}-{count_today + 1:04d}"
+
+                    logger.info(f"Creating new ticket {ticket_number} for order {shopify_order}")
+                    
                     message_doc = {
                         "user_id": ObjectId(user_id),
                         "company_id": ObjectId(company_id),
@@ -600,6 +615,7 @@ async def pubsub_push(request: Request, db=Depends(get_database)):
                         "channel": "email",
                         "status": "Open",
                         "title": subject,
+                        "ticket": ticket_number,
                         "client": sender,
                         "agent": to,
                         "messages": [chat_entry.dict()],
