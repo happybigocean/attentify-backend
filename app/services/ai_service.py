@@ -7,7 +7,7 @@ import base64
 #ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-2.5-pro",
     temperature=0,
     max_tokens=None,
     timeout=None,
@@ -83,20 +83,16 @@ async def analyze_emails_with_ai(message: Dict[str, Any]):
             encoded_content = base64.b64encode(combined_content.encode("utf-8")).decode("utf-8")
         except Exception as encode_exc:
             return {"error": f"Failed to encode contents: {encode_exc}"}
-
+        
         try:
             prompt = prompt_template.format(email_title=title ,email_contents=encoded_content)
         except Exception as prompt_exc:
             return {"error": f"Failed to format prompt: {prompt_exc}"}
-        print(prompt)
         try:
-            result = llm.invoke(prompt)
+            result =  await llm.ainvoke(prompt)
         except Exception as llm_exc:
             return {"error": f"LLM invocation failed: {llm_exc}"}
 
-        return {
-            "entry_ids": [entry.get("metadata", {}).get("gmail_id") for entry in last_entries],
-            "response": getattr(result, 'content', str(result))
-        }
+        return result
     except Exception as e:
         return {"error": f"Unexpected error: {e}"}

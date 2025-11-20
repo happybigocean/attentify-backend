@@ -461,7 +461,10 @@ async def analyze_email_message(
     result = await analyze_emails_with_ai(doc)
     # result is now a single dict, not a list
     
-    order_info = clean_json_response(result["response"])
+    response = getattr(result, 'content', str(result))
+    print("Email AI process response: ", response)
+    order_info = clean_json_response(response)
+    
     order_id = str(order_info.get("order_id", ""))
     order_name = order_id if order_id.startswith("#") else "#" + order_id
 
