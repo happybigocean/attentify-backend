@@ -17,15 +17,16 @@ llm = ChatGoogleGenerativeAI(
 
 EMAIL_ANALYSIS_PROMPT = (
     "The following text is an order, cancellation, or refund email encoded in Base64 from a Shopify customer. "
-    "Please check if the order_id field exists and is correct. "
+    "You must analyze BOTH the email title and the decoded email content to determine the order_id and request type. "
+    "Check if the order_id field exists and is valid based on either the title, the content, or both.\n\n"
     "If the email is correct, output ONLY a valid JSON object (no markdown, no backticks, no explanations). "
     "The JSON must include these fields: order_id, type (either 'cancel' or 'refund'), status (1 if correct, otherwise 0), and msg. "
-    "If the email is incorrect, msg should be a message requesting the order ID. "
-    "If the email is correct, msg should be a reply message to the customer, such as "
-    "'Your order has been canceled.' or 'Your refund has been processed.' or another appropriate reply. "
-    "Output nothing except the JSON object itself.\n\n"
-    "{email_title}"
-    "{email_contents}"
+    "If the email is incorrect or missing an order ID, status must be 0 and msg should be a message requesting the order ID. "
+    "If the email is correct, status must be 1 and msg should be an appropriate reply to the customer such as "
+    "'Your order has been canceled.' or 'Your refund has been processed.'\n\n"
+    "Analyze the following email:\n"
+    "Title: {email_title}\n"
+    "Content: {email_contents}"
 )
 
 prompt_template = PromptTemplate(
@@ -87,7 +88,7 @@ async def analyze_emails_with_ai(message: Dict[str, Any]):
             prompt = prompt_template.format(email_title=title ,email_contents=encoded_content)
         except Exception as prompt_exc:
             return {"error": f"Failed to format prompt: {prompt_exc}"}
-
+        print(prompt)
         try:
             result = llm.invoke(prompt)
         except Exception as llm_exc:
