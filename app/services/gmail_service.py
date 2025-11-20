@@ -208,5 +208,16 @@ def get_gmail_service(user_credentials: dict):
         client_secret=user_credentials['client_secret'],
         scopes=user_credentials.get('scopes', ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']),
     )
+
+    request = Request()
+
+   # Refresh the credentials
+    try:
+        creds.refresh(request)
+        print("Credentials refreshed successfully!")
+        print(f"New access token: {creds.token}")
+    except Exception as e:
+        print(f"Error refreshing credentials: {e}")
+
     service = build('gmail', 'v1', credentials=creds)
     return service
