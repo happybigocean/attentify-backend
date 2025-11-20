@@ -24,11 +24,12 @@ EMAIL_ANALYSIS_PROMPT = (
     "If the email is correct, msg should be a reply message to the customer, such as "
     "'Your order has been canceled.' or 'Your refund has been processed.' or another appropriate reply. "
     "Output nothing except the JSON object itself.\n\n"
+    "{email_title}"
     "{email_contents}"
 )
 
 prompt_template = PromptTemplate(
-    input_variables=["email_contents"],
+    input_variables=["email_title", "email_contents"],
     template=EMAIL_ANALYSIS_PROMPT
 )
 
@@ -65,6 +66,7 @@ async def analyze_emails_with_ai(message: Dict[str, Any]):
         Single AI JSON output for the last 3 messages combined, or an error message.
     """
     try:
+        title = message.get("title", "")
         entries = message.get("messages", [])
         if not entries:
             return {"error": "No messages found in input."}
@@ -82,7 +84,7 @@ async def analyze_emails_with_ai(message: Dict[str, Any]):
             return {"error": f"Failed to encode contents: {encode_exc}"}
 
         try:
-            prompt = prompt_template.format(email_contents=encoded_content)
+            prompt = prompt_template.format(email_title=title ,email_contents=encoded_content)
         except Exception as prompt_exc:
             return {"error": f"Failed to format prompt: {prompt_exc}"}
 
