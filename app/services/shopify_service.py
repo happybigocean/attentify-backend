@@ -12,7 +12,7 @@ async def get_all_shopify_creds(db):
 def fetch_orders_from_shop1(shop, access_token):
     """Fetch all orders from a Shopify store using the access token."""
     orders = []
-    url = f"https://{shop}/admin/api/2024-10/orders.json?status=any&limit=250"
+    url = f"https://{shop}/admin/api/2025-10/orders.json?status=any&limit=250"
     headers = {
         "X-Shopify-Access-Token": access_token,
         "Content-Type": "application/json"
@@ -48,7 +48,7 @@ def fetch_orders_from_shop1(shop, access_token):
 
 async def fetch_orders_from_shop(shop, access_token):
     """Fetch the 30 most recent orders from a Shopify store using the access token."""
-    url = f"https://{shop}/admin/api/2024-10/orders.json?status=any&limit=10&order=created_at desc"
+    url = f"https://{shop}/admin/api/2025-10/orders.json?status=any&limit=10&order=created_at desc"
     headers = {
         "X-Shopify-Access-Token": access_token,
         "Content-Type": "application/json"

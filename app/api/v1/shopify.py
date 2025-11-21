@@ -22,8 +22,9 @@ router = APIRouter()
 
 SHOPIFY_API_KEY = os.getenv("SHOPIFY_API_KEY")
 SHOPIFY_API_SECRET = os.getenv("SHOPIFY_API_SECRET")
+SHOPIFY_API_VERSION = os.getenv("SHOPIFY_API_VERSION", "2025-10")
 SHOPIFY_REDIRECT_URI = os.getenv("SHOPIFY_REDIRECT_URI", "http://localhost:8000/api/v1/shopify/callback")
-SHOPIFY_SCOPE = "read_orders,write_orders,read_customers,write_customers"
+SHOPIFY_SCOPES = os.getenv("SHOPIFY_SCOPES", "read_products,write_products,read_orders,write_orders,read_customers,write_customers")
 SHOPIFY_INSTALL_URL=os.getenv("SHOPIFY_INSTALL_URL")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
@@ -36,9 +37,9 @@ class ShopifyAuthHelper:
     def build_authorization_url(self, shop: str, redirect_uri: str):
         params = {
             "client_id": self.client_id,
-            "scope": "read_orders,write_products",  # adjust your scopes
+            "scope": SHOPIFY_SCOPES,  
             "redirect_uri": redirect_uri,
-            "state": "secure_random_state",  # implement CSRF protection!
+            "state": "secure_random_state",  
         }
         return f"https://{shop}/admin/oauth/authorize?{urlencode(params)}"
 
@@ -179,7 +180,7 @@ def get_shopify_orders(request: Request):
         raise HTTPException(status_code=401, detail="Shop not authenticated")
 
     access_token = shopify_cred["access_token"]
-    orders_url = f"https://{shop}/admin/api/2024-10/orders.json"
+    orders_url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/orders.json"
 
     headers = {
         "X-Shopify-Access-Token": access_token,
@@ -242,7 +243,7 @@ async def delete_shopify_cred(shopify_id: str, request: Request):
 
     # 2️⃣ If webhook_id exists, attempt to delete the webhook from Shopify
     if webhook_id and shop and access_token:
-        webhook_url = f"https://{shop}/admin/api/2024-10/webhooks/{webhook_id}.json"
+        webhook_url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/webhooks/{webhook_id}.json"
         headers = {
             "X-Shopify-Access-Token": access_token,
             "Content-Type": "application/json"
@@ -269,7 +270,7 @@ async def delete_shopify_cred(shopify_id: str, request: Request):
 
 # Register Shopify Webhook
 def register_shopify_webhook(shop: str, access_token: str):
-    webhook_url = f"https://{shop}/admin/api/2024-10/webhooks.json"
+    webhook_url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/webhooks.json"
     headers = {
         "X-Shopify-Access-Token": access_token,
         "Content-Type": "application/json"
@@ -299,7 +300,7 @@ def register_shopify_webhook(shop: str, access_token: str):
 
 # Delete Shopify Webhook
 def delete_shopify_webhook(shop: str, access_token: str, webhook_id: str):
-    webhook_url = f"https://{shop}/admin/api/2024-10/webhooks/{webhook_id}.json"
+    webhook_url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/webhooks/{webhook_id}.json"
     headers = {
         "X-Shopify-Access-Token": access_token,
         "Content-Type": "application/json"
@@ -507,7 +508,7 @@ async def refund_order(payload: dict = Body(...)):
         }
     }
 
-    url = f"https://{shop}/admin/api/2024-10/orders/{order_id}/refunds.json"
+    url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/orders/{order_id}/refunds.json"
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -537,7 +538,7 @@ async def cancel_order(payload: dict = Body(...)):
     # --- Step 1: Validate input ---
     order_id = payload.get("order_id")
     shop = payload.get("shop")
-
+    
     if not order_id or not shop:
         return JSONResponse(
             status_code=400,
@@ -557,6 +558,7 @@ async def cancel_order(payload: dict = Body(...)):
 
     # --- Step 3: Get order info from DB ---
     order_doc = await db.orders.find_one({"order_id": int(order_id)})
+
     if not order_doc:
         return JSONResponse(
             status_code=404,
@@ -571,8 +573,8 @@ async def cancel_order(payload: dict = Body(...)):
         )
 
     # --- Step 5: Call Shopify Cancel API ---
-    cancel_url = f"https://{shop}/admin/api/2024-10/orders/{int(order_id)}/cancel.json"
-
+    cancel_url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/orders/{int(order_id)}/cancel.json"
+    print(cancel_order)
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(cancel_url, headers=headers)
