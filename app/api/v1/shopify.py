@@ -383,7 +383,8 @@ async def shopify_orders_create_webhook(
             "shipping_address": data.get("shipping_address", {}),
             "billing_address": data.get("billing_address", {}),
             "line_items": [
-                {
+                {   
+                    "id": item.get("id"),
                     "product_id": item.get("product_id"),
                     "name": item.get("name"),
                     "quantity": item.get("quantity"),
@@ -391,6 +392,11 @@ async def shopify_orders_create_webhook(
                 } for item in data.get("line_items", [])
             ],
             "total_price": data.get("total_price"),
+            "total_shipping_price": (
+                    data.get("total_shipping_price_set", {})
+                        .get("shop_money", {})
+                        .get("amount", 0)
+                    ),
             "payment_status": data.get("financial_status"),
             "fulfillment_status": data.get("fulfillment_status"),
             "updated_at": data.get("updated_at")
@@ -478,59 +484,107 @@ async def refund_order(payload: dict = Body(...)):
 
     order_id = payload.get("order_id")
     shop = payload.get("shop")
+    selected_items = payload.get("selected_items", [])
+    refund_shipping = payload.get("refund_shipping")  # optional override
+    note = payload.get("note", "")
 
     if not order_id or not shop:
         return JSONResponse(status_code=400, content={"error": "Missing order_id or shop"})
 
-    # Get access token from shopify_cred collection
     shopify_cred = await db["shopify_cred"].find_one({"shop": shop})
     if not shopify_cred:
         return JSONResponse(status_code=404, content={"error": "Shop credentials not found"})
 
     access_token = shopify_cred.get("access_token")
 
-    # Get order info
     order = await db["orders"].find_one({"order_id": int(order_id)})
     if not order:
         return JSONResponse(status_code=404, content={"error": "Order not found"})
 
-    # Build refund payload (simple example)
-    refund_payload = {
+    # STEP 1: Build refund line items for calculate.json
+    refund_line_items = [
+        {
+            "line_item_id": item["line_item_id"],
+            "quantity": item["quantity"]
+        }
+        for item in selected_items
+    ]
+
+    # STEP 2: Prepare calculate payload
+    calculate_payload = {
         "refund": {
-            "note": "Full refund issued via API",
-            "shipping": {"full_refund": True},
-            "refund_line_items": [
-                {
-                    "line_item_id": order["line_items"][0]["product_id"],
-                    "quantity": order["line_items"][0]["quantity"],
-                }
-            ],
+            "refund_line_items": refund_line_items,
+            "shipping": {
+                "amount": float(refund_shipping) if refund_shipping else None
+            }
         }
     }
 
-    url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/orders/{order_id}/refunds.json"
+    calculate_url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/orders/{order_id}/refunds/calculate.json"
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            url,
-            headers={"X-Shopify-Access-Token": access_token, "Content-Type": "application/json"},
-            json=refund_payload,
+        calc_response = await client.post(
+            calculate_url,
+            headers={
+                "X-Shopify-Access-Token": access_token,
+                "Content-Type": "application/json",
+            },
+            json=calculate_payload,
         )
 
-        # 🟨 Print debug info — status and text
-        print("Shopify Refund Response Status:", response.status_code)
-        print("Shopify Refund Response Body:", response.text)
+    print("🟨 Calculate Status:", calc_response.status_code)
+    print("🟨 Calculate Body:", calc_response.text)
 
-        if response.status_code >= 400:
-            # Try to return the message from Shopify
-            try:
-                data = response.json()
-            except Exception:
-                data = {"error": response.text}
-            return JSONResponse(status_code=response.status_code, content=data)
+    if calc_response.status_code >= 400:
+        return JSONResponse(status_code=calc_response.status_code, content=calc_response.json())
 
-        return {"msg": "Refund processed successfully", "shopify_response": response.json()}
-    
+    calc_refund = calc_response.json()["refund"]
+
+    corrected_transactions = []
+
+    for t in calc_refund["transactions"]:
+        corrected_transactions.append({
+            "kind": "refund",
+            "parent_id": t["parent_id"],
+            "amount": t["amount"],
+            "gateway": t["gateway"]
+        })
+
+    # STEP 3: Use Shopify’s calculated refund EXACTLY
+    final_payload = {
+        "refund": {
+            "note": note or "Refund processed via API",
+            "refund_line_items": calc_refund["refund_line_items"],
+            "shipping": calc_refund["shipping"],
+            "transactions": corrected_transactions,  # fixed
+            "notify": True
+        }
+    }
+
+    # STEP 4: Submit refund
+    refund_url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/orders/{order_id}/refunds.json"
+
+    async with httpx.AsyncClient() as client:
+        refund_response = await client.post(
+            refund_url,
+            headers={
+                "X-Shopify-Access-Token": access_token,
+                "Content-Type": "application/json",
+            },
+            json=final_payload,
+        )
+
+    print("🟩 Refund Status:", refund_response.status_code)
+    print("🟩 Refund Body:", refund_response.text)
+
+    if refund_response.status_code >= 400:
+        return JSONResponse(status_code=refund_response.status_code, content=refund_response.json())
+
+    return {
+        "msg": "Refund processed successfully",
+        "shopify_response": refund_response.json()
+    }
+
 @router.post("/order/cancel")
 async def cancel_order(payload: dict = Body(...)):
     db = await get_database()
@@ -574,7 +628,7 @@ async def cancel_order(payload: dict = Body(...)):
 
     # --- Step 5: Call Shopify Cancel API ---
     cancel_url = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/orders/{int(order_id)}/cancel.json"
-    print(cancel_order)
+    
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(cancel_url, headers=headers)
