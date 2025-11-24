@@ -16,7 +16,7 @@ llm = ChatGoogleGenerativeAI(
 )
 
 EMAIL_ANALYSIS_PROMPT = (
-    "You are an very talented order email analyze asistant."
+    "You are a very talented order email analysis assistant."
     "The following text is an order, cancellation, or refund email encoded in Base64 from a Shopify customer. "
     "You must analyze BOTH the email title and the decoded email content to determine the order_id and request type. "
     "Check if the order_id field exists and is valid based on either the title, the content, or both.\n\n"
