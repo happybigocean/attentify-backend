@@ -526,7 +526,7 @@ async def reply_to_message(
     if original_msg_id and not original_msg_id.startswith("<"):
         original_msg_id = f"<{original_msg_id}>"
 
-    mime_msg = MIMEText(body["content"])
+    mime_msg = MIMEText(body["content"], "html")
     mime_msg['To'] = to_addr
     mime_msg['From'] = agent_email
     mime_msg['Subject'] = subject if subject.lower().startswith("re:") else f"Re: {subject}"
@@ -577,4 +577,6 @@ async def reply_to_message(
 
     if '_id' in updated_message:
         updated_message['_id'] = str(updated_message['_id'])
+        updated_message['user_id'] = str(updated_message['user_id'])
+        updated_message['company_id'] = str(updated_message['company_id'])
     return updated_message
