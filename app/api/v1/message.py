@@ -457,8 +457,6 @@ async def analyze_email_message(
     message_doc = await db["messages"].find_one({"_id": ObjectId(message_id)})
     if not message_doc:
         raise HTTPException(status_code=404, detail="Message not found")
-    
-    print(message_doc)
 
     order_info = None
     
