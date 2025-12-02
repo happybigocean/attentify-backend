@@ -457,13 +457,25 @@ async def analyze_email_message(
     message_doc = await db["messages"].find_one({"_id": ObjectId(message_id)})
     if not message_doc:
         raise HTTPException(status_code=404, detail="Message not found")
-
-    result = await analyze_emails_with_ai(message_doc)
-    # result is now a single dict, not a list
     
-    response = getattr(result, 'content', str(result))
-    print("Email AI process response: ", response)
-    order_info = clean_json_response(response)
+    print(message_doc)
+
+    order_info = None
+    
+    if all(message_doc.get(x) for x in ("order_name", "type", "reply_msg")):
+        order_info = {
+            "order_id": message_doc.get("order_name"),
+            "type": message_doc.get("type"),
+            "msg": message_doc.get("reply_msg"),
+        }
+
+    if order_info is None:
+        result = await analyze_emails_with_ai(message_doc)
+        # result is now a single dict, not a list
+        
+        response = getattr(result, 'content', str(result))
+        print("Email AI process response: ", response)
+        order_info = clean_json_response(response)
     
     order_id = str(order_info.get("order_id", ""))
     order_name = order_id if order_id.startswith("#") else "#" + order_id
@@ -474,6 +486,18 @@ async def analyze_email_message(
         db_order["user_id"] = str(db_order.get("user_id", ""))
         db_order["company_id"] = str(db_order.get("company_id", ""))
         order_info["shopify_order"] = db_order
+
+        if any(not message_doc.get(x) for x in ("order_name", "type", "reply_msg")):
+            await db["messages"].update_one(
+                {"_id": message_doc["_id"]},
+                {
+                    "$set": {
+                        "order_name": order_name,
+                        "type": order_info["type"],
+                        "reply_msg": order_info["msg"]
+                    }
+                }
+            )
     else:
         order_info["msg"] = "Order not found"
     return order_info
