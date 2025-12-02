@@ -75,9 +75,9 @@ async def analyze_emails_with_ai(message: Dict[str, Any]):
             return {"error": "No messages found in input."}
 
         # Get the last 3 entries (or fewer if not enough)
-        last_entries = entries[-3:]
+        # last_entries = entries[-3:]
         try:
-            combined_content = "\n\n".join(entry.get("content", "") for entry in last_entries)
+            combined_content = "\n\n".join(entry.get("content", "") for entry in entries)
         except Exception as content_exc:
             return {"error": f"Failed to combine message contents: {content_exc}"}
 
