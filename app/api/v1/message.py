@@ -478,7 +478,10 @@ async def analyze_email_message(
     order_id = str(order_info.get("order_id", ""))
     order_name = order_id if order_id.startswith("#") else "#" + order_id
 
-    db_order = await db["orders"].find_one({"name": order_name})
+    match = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', message_doc.get('client'))
+    email = match[0]
+
+    db_order = await db["orders"].find_one({"name": order_name, "customer.email": email})
     if db_order:
         db_order["_id"] = str(db_order["_id"])
         db_order["user_id"] = str(db_order.get("user_id", ""))
