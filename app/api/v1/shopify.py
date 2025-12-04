@@ -422,7 +422,8 @@ async def get_orders(
     shop: str = Query("", description="Filter by shop"),
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(10, ge=1, le=100, description="Page size"),
-    company_id: str = Query("", description="Company ID")
+    company_id: str = Query("", description="Company ID"),
+    email: str = Query("", description="Email")
 ):
     db = request.app.state.db
 
@@ -437,6 +438,8 @@ async def get_orders(
         filter_query["shop"] = shop
     if company_id:
         filter_query["company_id"] = ObjectId(company_id)
+    if email:
+        filter_query["customer.email"] = email
 
     # Count total documents for pagination
     total_count = await db.orders.count_documents(filter_query)
