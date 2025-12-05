@@ -458,49 +458,45 @@ async def analyze_email_message(
     if not message_doc:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    order_info = None
-    
-    if all(message_doc.get(x) for x in ("order_name", "type", "reply_msg")):
-        order_info = {
-            "order_id": message_doc.get("order_name"),
-            "type": message_doc.get("type"),
-            "msg": message_doc.get("reply_msg"),
-        }
-
-    if order_info is None:
+    if not (order_info := message_doc.get('order_info')):
         result = await analyze_emails_with_ai(message_doc)
         # result is now a single dict, not a list
         
         response = getattr(result, 'content', str(result))
         print("Email AI process response: ", response)
         order_info = clean_json_response(response)
-    
-    order_id = str(order_info.get("order_id", ""))
-    order_name = order_id if order_id.startswith("#") else "#" + order_id
 
-    match = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', message_doc.get('client'))
-    email = match[0]
-
-    db_order = await db["orders"].find_one({"name": order_name, "customer.email": email})
-    if db_order:
-        db_order["_id"] = str(db_order["_id"])
-        db_order["user_id"] = str(db_order.get("user_id", ""))
-        db_order["company_id"] = str(db_order.get("company_id", ""))
-        order_info["shopify_order"] = db_order
-
-        if any(not message_doc.get(x) for x in ("order_name", "type", "reply_msg")):
+        if (order_info.get('order_id')):
             await db["messages"].update_one(
                 {"_id": message_doc["_id"]},
                 {
                     "$set": {
-                        "order_name": order_name,
-                        "type": order_info["type"],
-                        "reply_msg": order_info["msg"]
+                        "order_info": order_info,
                     }
                 }
             )
+    
+    order_id = str(order_info.get("order_id", ""))
+    order_name = order_id if order_id.startswith("#") else "#" + order_id
+
+    db_order = await db["orders"].find_one({"name": order_name})
+    
+    if db_order:
+        match = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', message_doc.get('client'))
+        email = match[0]
+
+        if (db_order.get("customer", {}).get("email", "") == email):
+            db_order["_id"] = str(db_order["_id"])
+            db_order["user_id"] = str(db_order.get("user_id", ""))
+            db_order["company_id"] = str(db_order.get("company_id", ""))
+            order_info["shopify_order"] = db_order
+
+        else:
+            order_info["msg"] = "Email not matched"
+
     else:
         order_info["msg"] = "Order not found"
+
     return order_info
 
 @router.post("/{id}/reply", response_model=dict)
