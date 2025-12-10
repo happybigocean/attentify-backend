@@ -367,6 +367,7 @@ async def google_oauth_callback(
 
     loop = asyncio.get_running_loop()
     watch_response = await loop.run_in_executor(None, watch_gmail)
+    print(watch_response)
 
     history_id = watch_response["historyId"]
 
