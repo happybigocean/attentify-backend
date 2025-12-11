@@ -7,6 +7,10 @@ import os
 from dotenv import load_dotenv
 load_dotenv()  # Load from .env at startup
 from app.db.mongodb import get_database
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from app.core.config import settings
+import asyncio
 
 import socketio
 
@@ -23,6 +27,41 @@ MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "attentify")
 from starlette.middleware.sessions import SessionMiddleware
 
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
+def set_gmail_watch(cred):
+    access_token = cred["access_token"]
+    refresh_token = cred["refresh_token"]
+            
+    creds = Credentials(
+        token=access_token,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        scopes=["https://www.googleapis.com/auth/gmail.readonly"]
+    )
+
+    gmail = build("gmail", "v1", credentials=creds)
+    watch_request = {
+        "labelIds": ["INBOX"],
+        "topicName": f"projects/{settings.PUBSUB_PROJECT}/topics/{settings.PUBSUB_TOPIC}",
+    }
+    return gmail.users().watch(userId="me", body=watch_request).execute()
+
+async def set_gmail_watches_periodically():
+    while True:
+        print("Setting up Gmail Watches...")
+        db = app.state.db
+        cursor = db["gmail_accounts"].find()
+        async for cred in cursor:
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(None, set_gmail_watch, cred)
+            print(response)
+            
+        await asyncio.sleep(24 * 3600)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -35,6 +74,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print("❌ Failed to connect to MongoDB:", e)
         raise e  # Optional: prevent app from starting if DB fails
+
+    asyncio.create_task(set_gmail_watches_periodically())
 
     yield  # App runs
 
