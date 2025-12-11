@@ -225,6 +225,14 @@ async def get_message(id: str, db: AsyncIOMotorDatabase = Depends(get_database))
 
     return doc
 
+@router.put("/{id}", response_model=dict)
+async def update_message(id: str, payload: dict = Body(...), db: AsyncIOMotorDatabase = Depends(get_database)):
+    db["messages"].find_one_and_update(
+        {"_id": ObjectId(id)},
+        {"$set": payload}
+    )
+    return {"message": "Message updated"}
+
 async def serialize_comment(comment: dict, db) -> dict:
     user = await db["users"].find_one({"_id": comment["user_id"]})
     return {
